@@ -3,7 +3,7 @@
 name: readiness
 on:
   pull_request:
-    paths: ["tools/readiness/**", "perf-budget.toml", ".github/workflows/readiness.yml"]
+    paths: ["tools/readiness/**", "tools/harness/**", "perf-budget.toml", ".github/workflows/readiness.yml"]
   workflow_dispatch:
 permissions: {}
 concurrency:
@@ -33,6 +33,8 @@ jobs:
           lake build Tengai 2>&1 | tail -3
           python3 ../tools/perf/perf_profile.py load --module Tengai --root . --runs 9 > "$RUNNER_TEMP/measured/load.json"
           python3 ../tools/perf/perf_profile.py scale --sizes 0,200,800 --runs 5 > "$RUNNER_TEMP/measured/scale.json"
+      - name: The tamper checker on its mutation corpus (the checker's own measure; real harness runs add to it)
+        run: python3 tools/harness/tamper.py selftest --out "$RUNNER_TEMP/measured/tamper.json"
       - name: The report
         run: |
           python3 tools/readiness/gather.py "$RUNNER_TEMP/measured" --budget perf-budget.toml > "$RUNNER_TEMP/inputs.json"
