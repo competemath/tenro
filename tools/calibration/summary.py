@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 
 def render(groups: list[dict], tags_read: int | None = None, stats: dict | None = None) -> str:
