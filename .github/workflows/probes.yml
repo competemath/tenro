@@ -1,0 +1,55 @@
+# The soundness probes on a real compile (tools/soundness/Probes.lean): the hypothesis-dropping probe must report exactly the hypotheses the fixture's proofs never use.
+name: probes
+on:
+  pull_request:
+    paths: ["tools/soundness/**", ".github/workflows/probes.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: probes-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build the fixture and run the probe
+        working-directory: tools/soundness/fixture
+        run: |
+          lake build 2>&1 | tail -3
+          lake env lean --run ../Probes.lean unused-hyps Pr.Cases | tee "$RUNNER_TEMP/probe.out"
+      - name: Exactly the hypotheses the proofs never use
+        run: |
+          cut -f2,4 "$RUNNER_TEMP/probe.out" | sort > "$RUNNER_TEMP/got.txt"
+          printf 'Pr.cx_bool_int\t2\nPr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
+          diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
+          python3 tools/soundness/probe_findings.py hypothesis-dropping < "$RUNNER_TEMP/probe.out" | head -12
+      - name: The counterexample probe rejects a generalisation that is false and lets a true one through
+        working-directory: tools/soundness/fixture
+        run: |
+          run() { lake env lean --run ../Probes.lean counterexample Pr.Cases "$@"; }
+          {
+            run Pr.cx_needs_hyp 1
+            run Pr.cx_needs_hyp
+            run Pr.used_hyps 2,3
+            run Pr.used_hyps 3
+            run Pr.unused_hyp 2
+            run Pr.cx_bool_int 2
+            run Pr.one_of_two 3
+            run Pr.dependent 1
+          } > "$RUNNER_TEMP/cx.out"
+          cat "$RUNNER_TEMP/cx.out"
+          printf 'counterexample\tPr.cx_needs_hyp\t1\ta=0\nnone\tPr.cx_needs_hyp\t\ncounterexample\tPr.used_hyps\t2,3\ta=0, b=0\ncounterexample\tPr.used_hyps\t3\ta=0, b=2\nnone\tPr.unused_hyp\t2\nnone\tPr.cx_bool_int\t2\ncounterexample\tPr.one_of_two\t3\ta=0, b=1\nnone\tPr.dependent\t1\n' > "$RUNNER_TEMP/cx.want"
+          diff "$RUNNER_TEMP/cx.want" "$RUNNER_TEMP/cx.out"
