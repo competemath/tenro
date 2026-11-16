@@ -65,7 +65,18 @@ def label_pair(a: dict, b: dict, p: dict) -> dict:
         label, rule, border = "independent", "independent", near
     else:
         label, rule, border = "similar", "between", near
-    return {"a": a["name"], "b": b["name"], "label": label, "rule": rule, "jaccard": round(j, 4), "borderline": bool(border)}
+    out = {
+        "a": a["name"],
+        "b": b["name"],
+        "label": label,
+        "rule": rule,
+        "jaccard": round(j, 4),
+        "borderline": bool(border),
+        "df": round(1 - j, 4),
+    }
+    if "waypoints" in a and "waypoints" in b:  # the second axis of the divergence (isnad.py waypoints), when the closures carry it
+        out["dw"] = round(1 - _jaccard(set(a["waypoints"]), set(b["waypoints"])), 4)
+    return out
 
 
 def label_group(members: list[dict], p: dict) -> dict:
