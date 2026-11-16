@@ -1,0 +1,68 @@
+# The P1 exit criterion, in CI: the instruments produce numbers on a slice of at least 1,000 theorems, reproducibly. The slice is Lean core's Init.Data.Nat (about 1,400 theorems, needs no Tengoku tree):
+# tengoku-isnad (built from the commit in tengoku-tools.pin, only its Lean program and scripts are fetched) gives the records, the dependencies and the waypoints; tools/index/build.py builds the name-blind
+# indexes twice; the two builds must be byte-identical.
+name: slice
+on:
+  pull_request:
+    paths: ["tools/index/**", "tools/common/**", "tengoku-tools.pin", ".github/workflows/slice.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: slice-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  slice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: tengoku-isnad at the pinned commit (its Lean program and scripts only)
+        run: |
+          pin="$(tr -d '[:space:]' < tengoku-tools.pin)"
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]] || { echo "tengoku-tools.pin must hold a full 40-character commit"; exit 1; }
+          git clone -q --filter=blob:none --no-checkout https://github.com/competemath/tengoku "$RUNNER_TEMP/tengoku"
+          cd "$RUNNER_TEMP/tengoku"
+          git sparse-checkout set --no-cone '/TengokuIsnad.lean' '/scripts/' '/lakefile.toml' '/lean-toolchain' '/tools/isnad/'
+          git checkout -q "$pin"
+          lake build tengoku-isnad 2>&1 | tail -3
+      - name: Records, dependencies and waypoints of Init.Data.Nat
+        working-directory: ${{ runner.temp }}/tengoku
+        run: |
+          for mode in "" "--deps" "--haves"; do
+            lake env .lake/build/bin/tengoku-isnad $mode --import Init --module Init.Data.Nat > "$RUNNER_TEMP/out$mode.tsv" 2> "$RUNNER_TEMP/err$mode.txt"
+            tail -1 "$RUNNER_TEMP/err$mode.txt"
+          done
+          wc -l "$RUNNER_TEMP"/out*.tsv
+          test "$(wc -l < "$RUNNER_TEMP/out.tsv")" -ge 1000
+      - name: The indexes, built twice
+        run: |
+          for i in 1 2; do
+            python3 tools/index/build.py --isnad "$RUNNER_TEMP/out.tsv" --deps "$RUNNER_TEMP/out--deps.tsv" --isnad-py "$RUNNER_TEMP/tengoku/scripts/isnad.py" --out "$RUNNER_TEMP/idx$i" > "$RUNNER_TEMP/stats$i.json"
+          done
+          cat "$RUNNER_TEMP/stats1.json"
+          diff -r "$RUNNER_TEMP/idx1" "$RUNNER_TEMP/idx2" && echo "reproducible: the two builds are byte-identical"
+      - name: Waypoints of the slice
+        run: |
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import importlib.util, sys
+          d = sys.argv[1]
+          spec = importlib.util.spec_from_file_location("isnad", f"{d}/tengoku/scripts/isnad.py")
+          m = importlib.util.module_from_spec(spec); sys.modules["isnad"] = m; spec.loader.exec_module(m)
+          lines = [ln for ln in open(f"{d}/out--haves.tsv", encoding="utf-8").read().splitlines() if ln.startswith("isnad1-have\t")]
+          sets = m.waypoint_sets(lines)
+          print(f"{len(lines)} have statements, {len(sets)} theorems with at least one waypoint")
+          assert sets, "no waypoints at all"
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: slice, path: "${{ runner.temp }}/stats1.json\n${{ runner.temp }}/idx1", retention-days: 30 }
