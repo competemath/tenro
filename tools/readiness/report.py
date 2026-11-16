@@ -119,7 +119,15 @@ def gate4(i: dict) -> list[dict]:
     t, h, v = i.get("tamper"), i.get("harness"), i.get("validity")
     out = []
     if t and t.get("cases"):
-        out.append(crit("undetected statement/definition tampering", "0", t["undetected"], t["undetected"] == 0, f"of {t['cases']} cases"))
+        out.append(
+            crit(
+                "undetected statement/definition tampering",
+                "0",
+                t["undetected"],
+                t["undetected"] == 0,
+                f"of {t['cases']} cases (the checker's own mutation corpus unless real harness runs are added)",
+            )
+        )
     else:
         out.append(crit("undetected statement/definition tampering", "0", None, None, "no tamper cases run"))
     if h and h.get("runs"):
