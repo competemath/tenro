@@ -1,5 +1,5 @@
-name = "tengai"
-defaultTargets = ["Tengai"]
+name = "tenro"
+defaultTargets = ["Tenro"]
 
 # The gate is the compiler: any warning (an unused variable, a `sorry`, a deprecation) is an error here.
 [leanOptions]
@@ -12,6 +12,11 @@ warningAsError = true
 name = "tengoku"
 path = ".tengoku"
 
-[[lean_lib]]
+# The clean core, exactly (core.lock; tools/mirror/mirror.py). Tenro's overlay may import it; it never edits it.
+[[require]]
 name = "Tengai"
-globs = ["Tengai", "Tengai.+"]
+path = "core"
+
+[[lean_lib]]
+name = "Tenro"
+globs = ["Tenro", "Tenro.+"]

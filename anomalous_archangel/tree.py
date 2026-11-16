@@ -1,4 +1,4 @@
-"""A map of the Tengai tree: modules, what they import, what they declare. Read by the archangel before every drip and handed to the angels
+"""A map of the Tenro tree: modules, what they import, what they declare. Read by the archangel before every drip and handed to the angels
 as a digest; also the source of the root file and the closure the Leak IV gate compiles."""
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class Module:
 class TreeMap:
     modules: dict[str, Module]
 
-    def tengai_imports(self, name: str) -> list[str]:
+    def tenro_imports(self, name: str) -> list[str]:
         return [i for i in self.modules[name].imports if i in self.modules]
 
     def order(self) -> list[str]:
@@ -57,7 +57,7 @@ class TreeMap:
             if seen.get(n) == 1:
                 raise ValueError(f"import cycle through {n}")
             seen[n] = 1
-            for i in sorted(self.tengai_imports(n)):
+            for i in sorted(self.tenro_imports(n)):
                 visit(i)
             seen[n] = 2
             out.append(n)
@@ -67,14 +67,14 @@ class TreeMap:
         return out
 
     def closure(self, name: str) -> list[str]:
-        """The module and everything of Tengai it needs, dependencies first."""
+        """The module and everything of Tenro it needs, dependencies first."""
         need: set[str] = set()
 
         def go(n: str) -> None:
             if n in need:
                 return
             need.add(n)
-            for i in self.tengai_imports(n):
+            for i in self.tenro_imports(n):
                 go(i)
 
         go(name)
@@ -97,7 +97,7 @@ class TreeMap:
 
     def digest(self, max_chars: int = 24_000) -> str:
         """What the angels read first: every module with its imports and its declarations, shortest useful form."""
-        out = [f"TENGAI MAP — {self.stats()}"]
+        out = [f"TENRO MAP — {self.stats()}"]
         for n in self.order():
             m = self.modules[n]
             out.append(f"\n## {n}  ({m.lines} lines; imports {', '.join(m.imports) or '-'})")
@@ -159,7 +159,7 @@ def parse_module(name: str, rel: str, text: str) -> Module:
 
 def scan(root: Path) -> TreeMap:
     mods: dict[str, Module] = {}
-    base = root / "Tengai"
+    base = root / "Tenro"
     for p in sorted(base.rglob("*.lean")) if base.is_dir() else []:
         n = module_name(root, p)
         mods[n] = parse_module(n, str(p.relative_to(root)), p.read_text(encoding="utf-8"))
@@ -167,5 +167,5 @@ def scan(root: Path) -> TreeMap:
 
 
 def root_file(tm: TreeMap) -> str:
-    head = "-- Tengai: the root. anomalous-archangel regenerates this list (python -m anomalous_archangel root); every module under Tengai/ is imported.\n"
+    head = "-- Tenro: the root. anomalous-archangel regenerates this list (python -m anomalous_archangel root); every module under Tenro/ is imported.\n"
     return head + "".join(f"import {n}\n" for n in sorted(tm.modules))

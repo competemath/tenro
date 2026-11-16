@@ -10,14 +10,14 @@ from anomalous_archangel.memory import Memory
 from anomalous_archangel.requests import Queue
 
 ROOT = Path(__file__).resolve().parent.parent
-GOOD = "import Tengoku.All\n\nnamespace Tengai\n\ntheorem lifted (n : ℕ) : n + 0 = n := rfl\n\nend Tengai\n"
+GOOD = "import Tengoku.All\n\nnamespace Tenro\n\ntheorem lifted (n : ℕ) : n + 0 = n := rfl\n\nend Tenro\n"
 CLOCK = lambda: datetime(2026, 10, 29, 12, 0, tzinfo=UTC)  # noqa: E731
 
 
 def make_root(tmp_path):
-    shutil.copytree(ROOT / "Tengai", tmp_path / "Tengai")
+    shutil.copytree(ROOT / "Tenro", tmp_path / "Tenro")
     (tmp_path / "tengoku.pin").write_text("a" * 40 + "\n")
-    (tmp_path / "Tengai.lean").write_text(tree.root_file(tree.scan(tmp_path)))
+    (tmp_path / "Tenro.lean").write_text(tree.root_file(tree.scan(tmp_path)))
     return tmp_path
 
 
@@ -50,7 +50,7 @@ def test_a_whole_drip_with_a_fake_agent(tmp_path):
                         "refs": [],
                     }
                 ],
-                "lean_files": [{"path": "Tengai/Seed/Lifted.lean", "content": GOOD, "purpose": "a lift"}],
+                "lean_files": [{"path": "Tenro/Seed/Lifted.lean", "content": GOOD, "purpose": "a lift"}],
                 "requests": [{"statement": "∀ n : ℕ, n + 0 = n", "informal": "trivial", "why": "test"}],
             }
         }
@@ -58,8 +58,8 @@ def test_a_whole_drip_with_a_fake_agent(tmp_path):
     g = gate.FakeGate("leak-iv")
     g.compile = lambda script, allow_sorry=False: gate.GateResult("leak-iv", "ok")
     rec = drip.run(cfg(root), runner, [g], Memory(), CLOCK)
-    assert rec["counts"]["landed"] == 1 and (root / "Tengai/Seed/Lifted.lean").read_text().strip() == GOOD.strip()
-    assert "import Tengai.Seed.Lifted" in (root / "Tengai.lean").read_text()
+    assert rec["counts"]["landed"] == 1 and (root / "Tenro/Seed/Lifted.lean").read_text().strip() == GOOD.strip()
+    assert "import Tenro.Seed.Lifted" in (root / "Tenro.lean").read_text()
     assert rec["counts"]["requests"] == 1 and Queue.load(root / "drips/requests.json").items[0]["status"] == "open"
     assert all(f["label"] in ("note", "observation", "conjecture") for f in rec["findings"])
     d = root / "drips" / rec["id"]
@@ -75,12 +75,12 @@ def test_a_whole_drip_with_a_fake_agent(tmp_path):
 
 def test_a_file_the_gate_refuses_is_not_kept(tmp_path):
     root = make_root(tmp_path)
-    before = (root / "Tengai.lean").read_text()
-    runner = script({"abstractor": {"lean_files": [{"path": "Tengai/Seed/Bad.lean", "content": GOOD, "purpose": "p"}]}})
+    before = (root / "Tenro.lean").read_text()
+    runner = script({"abstractor": {"lean_files": [{"path": "Tenro/Seed/Bad.lean", "content": GOOD, "purpose": "p"}]}})
     failing = gate.FakeGate("lake", lambda tm, mods: gate.GateResult("lake", "failed", "boom", ["error: boom"]))
     rec = drip.run(cfg(root), runner, [failing], Memory(), CLOCK)
-    assert rec["counts"]["landed"] == 0 and not (root / "Tengai/Seed/Bad.lean").exists()
-    assert (root / "Tengai.lean").read_text() == before
+    assert rec["counts"]["landed"] == 0 and not (root / "Tenro/Seed/Bad.lean").exists()
+    assert (root / "Tenro.lean").read_text() == before
     assert "boom" in rec["changes"][0]["reason"]
 
 
@@ -88,18 +88,18 @@ def test_sorry_is_stopped_before_any_gate_runs(tmp_path):
     root = make_root(tmp_path)
     g = gate.FakeGate("leak-iv")
     runner = script(
-        {"abstractor": {"lean_files": [{"path": "Tengai/Seed/S.lean", "content": GOOD.replace("rfl", "by sorry"), "purpose": "p"}]}}
+        {"abstractor": {"lean_files": [{"path": "Tenro/Seed/S.lean", "content": GOOD.replace("rfl", "by sorry"), "purpose": "p"}]}}
     )
     rec = drip.run(cfg(root), runner, [g], Memory(), CLOCK)
-    assert rec["counts"]["landed"] == 0 and g.calls == [] and not (root / "Tengai/Seed/S.lean").exists()
+    assert rec["counts"]["landed"] == 0 and g.calls == [] and not (root / "Tenro/Seed/S.lean").exists()
 
 
 def test_an_unavailable_gate_defers_and_nothing_lands_unchecked(tmp_path):
     root = make_root(tmp_path)
-    runner = script({"abstractor": {"lean_files": [{"path": "Tengai/Seed/D.lean", "content": GOOD, "purpose": "p"}]}})
+    runner = script({"abstractor": {"lean_files": [{"path": "Tenro/Seed/D.lean", "content": GOOD, "purpose": "p"}]}})
     down = gate.FakeGate("lake", lambda tm, mods: gate.GateResult("lake", "infra", "no lean here"))
     rec = drip.run(cfg(root), runner, [down], Memory(), CLOCK)
-    assert rec["counts"]["landed"] == 0 and not (root / "Tengai/Seed/D.lean").exists()
+    assert rec["counts"]["landed"] == 0 and not (root / "Tenro/Seed/D.lean").exists()
     none = drip.run(cfg(root), runner, [], Memory(), CLOCK)
     assert none["counts"]["landed"] == 0
 
@@ -111,13 +111,13 @@ def test_replacing_a_module_gates_everything_that_depends_on_it(tmp_path):
         {
             "abstractor": {
                 "lean_files": [
-                    {"path": "Tengai/Seed/Gauss.lean", "content": (ROOT / "Tengai/Seed/Gauss.lean").read_text() + "\n", "purpose": "p"}
+                    {"path": "Tenro/Seed/Gauss.lean", "content": (ROOT / "Tenro/Seed/Gauss.lean").read_text() + "\n", "purpose": "p"}
                 ]
             }
         }
     )
     drip.run(cfg(root), runner, [g], Memory(), CLOCK)
-    assert g.calls and "Tengai.Bridge.GaussOdd" in g.calls[0] and "Tengai.Seed.Gauss" in g.calls[0]
+    assert g.calls and "Tenro.Bridge.GaussOdd" in g.calls[0] and "Tenro.Seed.Gauss" in g.calls[0]
 
 
 def test_spawn_limits_hold_and_helpers_cannot_spawn(tmp_path):
@@ -169,7 +169,7 @@ def test_a_broken_angel_costs_something_and_stops_nothing(tmp_path):
 
 
 def test_the_cli_dry_run_changes_nothing_in_the_repository(tmp_path, capsys):
-    before = {p: p.read_bytes() for p in (ROOT / "Tengai").rglob("*.lean")}
+    before = {p: p.read_bytes() for p in (ROOT / "Tenro").rglob("*.lean")}
     assert cli.main(["drip", "--dry-run", "--budget", "3"]) == 0
     assert "dry run in" in capsys.readouterr().out
-    assert before == {p: p.read_bytes() for p in (ROOT / "Tengai").rglob("*.lean")}
+    assert before == {p: p.read_bytes() for p in (ROOT / "Tenro").rglob("*.lean")}

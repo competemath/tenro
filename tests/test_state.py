@@ -39,7 +39,7 @@ def test_the_request_queue_lifecycle(tmp_path):
         raise AssertionError("a claimed request cannot be claimed again")
     except ValueError:
         pass
-    q.fulfil(item["id"], "Tengai/Proved/R.lean")
+    q.fulfil(item["id"], "Tenro/Proved/R.lean")
     q.save(tmp_path / "r.json")
     assert Queue.load(tmp_path / "r.json").get(item["id"])["status"] == "proved"
 

@@ -1,9 +1,9 @@
-"""The gate. A Lean change lands in Tengai only when every configured gate says `ok`:
+"""The gate. A Lean change lands in Tenro only when every configured gate says `ok`:
 
 1. `lint`    — a static look at the text: no sorry/admit/axiom/native_decide/unsafe/extern, no global notation or macros (a library that leaks
-               notation breaks everybody who imports it: Tengoku's canary exists because of one), imports only `Tengoku.All` and Tengai,
+               notation breaks everybody who imports it: Tengoku's canary exists because of one), imports only `Tengoku.All` and Tenro,
                bounded size. Runs first because it is free.
-2. `leak-iv` — the file and everything of Tengai it needs, as one script, compiled by Leak IV (`verify_full_script` over MCP/SSE, the verifier
+2. `leak-iv` — the file and everything of Tenro it needs, as one script, compiled by Leak IV (`verify_full_script` over MCP/SSE, the verifier
                the provers use): no errors, no warnings, no sorry.
 3. `lake`    — `lake build` of the module and of every module that depends on it, against Tengoku at the pin; the lakefile turns every
                warning into an error. Then every declaration's axioms are printed and only propext, Classical.choice and Quot.sound are allowed.
@@ -53,8 +53,8 @@ FORBIDDEN = [
     (r"set_option\s+maxHeartbeats\s+(\d+)", "maxHeartbeats (checked below)"),
     (r"attribute\s*\[[^\]]*\binstance\b", "a global instance attribute"),
 ]
-OWN_DIAG = re.compile(r"^(error|warning)\b[^\n]*?\bTengai/\S+\.lean:\d+")
-IMPORT_OK = re.compile(r"^(import Tengoku\.All|import Tengai(\.[A-Za-z0-9_]+)+)\s*$")
+OWN_DIAG = re.compile(r"^(error|warning)\b[^\n]*?\bTenro/\S+\.lean:\d+")
+IMPORT_OK = re.compile(r"^(import Tengoku\.All|import Tenro(\.[A-Za-z0-9_]+)+)\s*$")
 
 
 @dataclass
@@ -114,7 +114,7 @@ def lint(path: str, text: str) -> GateResult:
     for ln, line in enumerate(clean.splitlines(), 1):
         if line.startswith("import ") or line.startswith("public import "):
             if not IMPORT_OK.match(line.strip()):
-                errs.append(f"line {ln}: import not allowed ({line.strip()}); only Tengoku.All and Tengai.*")
+                errs.append(f"line {ln}: import not allowed ({line.strip()}); only Tengoku.All and Tenro.*")
     for pat, why in FORBIDDEN:
         for m in re.finditer(pat, clean):
             if "maxHeartbeats" in why:
@@ -137,7 +137,7 @@ def closure_script(tm: TreeMap, module: str) -> str:
 
 
 def verdict(text: str, allow_sorry: bool = False) -> tuple[str, list[str]]:
-    """('ok' | 'failed' | 'infra', messages): the reply of verify_full_script. Warnings fail it, as the Tengai gate says; a statement check
+    """('ok' | 'failed' | 'infra', messages): the reply of verify_full_script. Warnings fail it, as the Tenro gate says; a statement check
     (`allow_sorry`) forgives the warning that says `sorry` and nothing else."""
     diags = [(int(m.group(1)), m.group(2), m.group(3)) for m in DIAG.finditer(text)]
     errors = [f"line {n}: {msg[:200]}" for n, kind, msg in diags if kind == "Error"]
@@ -313,7 +313,7 @@ class LakeGate:
         for m in modules:
             r = self.run(["lake", "build", m], capture_output=True, text=True, timeout=3600, cwd=self.root, env=self.env, check=False)
             out = r.stdout + r.stderr
-            # Lake replays the saved warnings of Tengoku's own up-to-date modules on every build: only a diagnostic about a file of Tengai counts
+            # Lake replays the saved warnings of Tengoku's own up-to-date modules on every build: only a diagnostic about a file of Tenro counts
             bad = [ln for ln in out.splitlines() if OWN_DIAG.match(ln.strip())]
             if r.returncode != 0 or bad:
                 return GateResult(self.name, "failed", f"{m}: lake build failed", (bad or out.splitlines()[-8:])[:20])

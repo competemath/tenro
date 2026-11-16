@@ -1,4 +1,4 @@
-"""One drip: anomalous-archangel studies the Tengai tree and acts on it.
+"""One drip: anomalous-archangel studies the Tenro tree and acts on it.
 
     map the tree, read memory and Tengoku's arrivals -> choose lenses (<= breadth) -> spawn the angels with money reserved out of the
     budget -> each may send helpers one level down (limits and the ledger enforce depth, breadth and the conserved budget) -> the examiner
@@ -52,7 +52,7 @@ def now_utc() -> datetime:
 def stage_workdir(cfg: Config, ctx: dict, tm: tree.TreeMap, queue: Queue) -> Path:
     """The angels' own directory: a throwaway copy of the tree and the digests. Never the repository itself."""
     work = Path(tempfile.mkdtemp(prefix="archangel-"))
-    shutil.copytree(cfg.root / "Tengai", work / "tree" / "Tengai") if (cfg.root / "Tengai").is_dir() else (work / "tree").mkdir()
+    shutil.copytree(cfg.root / "Tenro", work / "tree" / "Tenro") if (cfg.root / "Tenro").is_dir() else (work / "tree").mkdir()
     (work / "digest").mkdir()
     (work / "digest" / "map.txt").write_text(ctx["map"])
     (work / "digest" / "memory.txt").write_text(ctx["memory"])
@@ -213,7 +213,7 @@ def run(cfg: Config, runner, gates: list, memory: Memory | None = None, clock=no
     changes = [] if not cfg.land else land_candidates(cfg, candidates, gates)
     tm_after = tree.scan(cfg.root)
     if any(c["landed"] for c in changes):
-        (cfg.root / "Tengai.lean").write_text(tree.root_file(tm_after))
+        (cfg.root / "Tenro.lean").write_text(tree.root_file(tm_after))
 
     # ---- proof requests: checked by a compiling gate, then queued ---------------------------------------------------------
     stmt_gate = next((g for g in gates if hasattr(g, "compile")), None)
@@ -221,7 +221,7 @@ def run(cfg: Config, runner, gates: list, memory: Memory | None = None, clock=no
     for r in raw_requests:
         checked = False
         if stmt_gate is not None:
-            res = stmt_gate.compile(f"import Tengoku.All\n\ntheorem tengai_request : {r['statement']} := by\n  sorry\n", allow_sorry=True)
+            res = stmt_gate.compile(f"import Tengoku.All\n\ntheorem tenro_request : {r['statement']} := by\n  sorry\n", allow_sorry=True)
             checked = res.ok
             if res.kind == "failed":
                 notes.append(f"request dropped, it does not elaborate: {r['statement'][:80]} ({'; '.join(res.errors[:1])[:120]})")

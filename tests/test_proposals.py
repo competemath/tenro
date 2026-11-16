@@ -11,8 +11,8 @@ def wrap(d):
 
 GOOD = {
     "summary": "s",
-    "findings": [{"kind": "bridge", "label": "conjecture", "title": "t", "body": "b", "refs": ["Tengai.x"]}],
-    "lean_files": [{"path": "Tengai/A/B.lean", "content": "import Tengoku.All\n", "purpose": "p"}],
+    "findings": [{"kind": "bridge", "label": "conjecture", "title": "t", "body": "b", "refs": ["Tenro.x"]}],
+    "lean_files": [{"path": "Tenro/A/B.lean", "content": "import Tengoku.All\n", "purpose": "p"}],
     "requests": [{"statement": "∀ n : ℕ, n = n", "informal": "i", "why": "w"}],
     "delegate": [{"lens": "bridger", "brief": "look"}],
 }
@@ -20,7 +20,7 @@ GOOD = {
 
 def test_a_good_answer_parses():
     p = proposals.parse(wrap(GOOD))
-    assert p.findings[0]["label"] == "conjecture" and p.lean_files[0]["path"] == "Tengai/A/B.lean" and len(p.delegate) == 1
+    assert p.findings[0]["label"] == "conjecture" and p.lean_files[0]["path"] == "Tenro/A/B.lean" and len(p.delegate) == 1
 
 
 def test_only_the_last_block_counts():
@@ -36,7 +36,7 @@ def test_helpers_cannot_delegate():
     [
         lambda d: d["findings"][0].update(label="verified"),
         lambda d: d["findings"][0].update(kind="proof"),
-        lambda d: d["lean_files"][0].update(path="../Tengai/A.lean"),
+        lambda d: d["lean_files"][0].update(path="../Tenro/A.lean"),
         lambda d: d["lean_files"][0].update(path="Tengoku/A.lean"),
         lambda d: d["findings"][0].update(body="x" * 5000),
         lambda d: d.update(extra=1),
