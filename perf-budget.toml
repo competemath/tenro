@@ -1,0 +1,17 @@
+# The performance gate's numbers (Tengai docs/design.md, gate 1). ABSOLUTE caps, never a ratio to Mathlib. They may only be LOWERED:
+# tools/perf/check_budget.py `ratchet` refuses a pull request that raises one, and `check` refuses a measurement above one.
+version = 1
+
+[load]
+# cold `import Tengai` in a fresh process, net of the bare-Lean baseline, median of 9 runs, GitHub-hosted ubuntu-latest (tools/perf/perf_profile.py load)
+cap_net_median_s = 0.25
+
+[scale]
+# the cost of one more module, from synthetic libraries of 0 / 200 / 800 one-theorem modules (tools/perf/perf_profile.py scale)
+cap_ms_per_module = 0.3
+
+[measured]
+# the first measurement (tenro#8, 2026-11-16, empty core): net 0.0025 s (p95 0.0134 s); 0.0283 ms per module. The caps are about ten times these: the runner's
+# noise is of that order, and an empty core says nothing about real content. They are lowered as the core fills and the numbers show how much room there is.
+net_median_s = 0.0025
+ms_per_module = 0.0283
