@@ -83,5 +83,32 @@ class Report(unittest.TestCase):
             self.assertEqual(R.main([]), 2)
 
 
+class Gather(unittest.TestCase):
+    def test_known_files_become_keys_and_missing_ones_stay_missing(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "readiness"))
+        import gather as G
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "load.json").write_text(json.dumps({"net_median_s": 0.01}))
+            (d / "scale.json").write_text(json.dumps({"ms_per_module": 0.02}))
+            (d / "lens-report.json").write_text(
+                json.dumps({"denominator": 10, "accepted": 10, "rate": 1.0, "rejected": [], "integrity_violations": 0})
+            )
+            (d / "mathlib-load.json").write_text(json.dumps({"net_median_s": 3.0}))
+            (d / "budget.toml").write_text("[load]\ncap_net_median_s = 0.25\n[scale]\ncap_ms_per_module = 0.3\n")
+            got = G.gather(d, d / "budget.toml")
+            self.assertEqual(
+                sorted(got), ["budget", "load", "mathlib_load_net_median_s", "migration", "migration_integrity_violations", "scale"]
+            )
+            self.assertEqual(got["migration_integrity_violations"], 0)
+            self.assertNotIn("tamper", got)
+            rep = R.report(got)
+            self.assertEqual(statuses(rep)["1"], "open")  # the soundness verdict and data stats are not there
+            self.assertEqual(statuses(rep)["3"], "pass")
+            self.assertEqual(G.main([str(d)]), 0)
+            self.assertEqual(G.main([]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

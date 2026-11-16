@@ -1,0 +1,41 @@
+# The five readiness gates, as they stand (tools/readiness/report.py). Manual and on changes to the report: it gathers what can be measured here (the import latency of core/) and says
+# plainly that everything else is unmeasured. Information, not a gate on the repository: the exit status of the report decides only whether Mathlib A/B campaigns may start.
+name: readiness
+on:
+  pull_request:
+    paths: ["tools/readiness/**", "perf-budget.toml", ".github/workflows/readiness.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: readiness-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Measure what can be measured here (core/ import latency)
+        working-directory: core
+        run: |
+          mkdir -p "$RUNNER_TEMP/measured"
+          lake build Tengai 2>&1 | tail -3
+          python3 ../tools/perf/perf_profile.py load --module Tengai --root . --runs 9 > "$RUNNER_TEMP/measured/load.json"
+          python3 ../tools/perf/perf_profile.py scale --sizes 0,200,800 --runs 5 > "$RUNNER_TEMP/measured/scale.json"
+      - name: The report
+        run: |
+          python3 tools/readiness/gather.py "$RUNNER_TEMP/measured" --budget perf-budget.toml > "$RUNNER_TEMP/inputs.json"
+          python3 tools/readiness/report.py "$RUNNER_TEMP/inputs.json" --markdown | tee "$RUNNER_TEMP/readiness.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: readiness, path: "${{ runner.temp }}/readiness.md\n${{ runner.temp }}/inputs.json", retention-days: 30 }
