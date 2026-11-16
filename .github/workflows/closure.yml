@@ -1,0 +1,53 @@
+# The dependency-closure extractor (tools/closure): unit tests on synthetic exports, and the real lean4export output of a small Lean fixture.
+name: closure
+on:
+  push:
+    branches: ["p1/**"]
+    paths: ["tools/closure/**", ".github/workflows/closure.yml"]
+  pull_request:
+    paths: ["tools/closure/**", ".github/workflows/closure.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: closure-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+jobs:
+  real-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: lean4export at the pinned commit
+        run: |
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
+          git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
+          cd "$RUNNER_TEMP/lean4export" && lake build 2>&1 | tail -3
+      - name: Build the fixture and export it
+        run: |
+          cd tools/closure/fixture
+          lake build 2>&1 | tail -3
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" Fixture > "$RUNNER_TEMP/fixture.ndjson"
+          wc -l "$RUNNER_TEMP/fixture.ndjson"
+      - name: The shape of every kind of line
+        run: python3 tools/closure/probe_schema.py "$RUNNER_TEMP/fixture.ndjson"
+      - name: The extractor on the real export (what Fixture.lean says it must do)
+        env: { CLOSURE_FIXTURE_EXPORT: "${{ runner.temp }}/fixture.ndjson" }
+        run: |
+          python -m pip install -q pytest==8.4.1
+          python -m pytest -q tests/test_closure.py tests/test_closure_real.py
+          python3 tools/closure/closure.py "$RUNNER_TEMP/fixture.ndjson" --names Fx.swap_a Fx.swap_b Fx.swap_c Fx.double_eq | cut -c1-300
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with: { name: fixture-export, path: "${{ runner.temp }}/fixture.ndjson", retention-days: 7 }
