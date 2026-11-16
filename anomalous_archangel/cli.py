@@ -1,7 +1,7 @@
 """python -m anomalous_archangel <command>
 
 drip      one drip (live: the claude CLI under containment, the gates Leak IV + Lake; --dry-run: a fake agent and a fake gate, in a copy)
-root      regenerate Tengai.lean from the modules under Tengai/
+root      regenerate Tenro.lean from the modules under Tenro/
 gate      the gate on the whole tree as it is (CI): lint, then Lake with warnings as errors and the axiom audit; --leak-iv adds Leak IV
 status    the index of drips and the open proof requests
 requests  list | claim | fulfil | abandon: the queue leak-archangel works from
@@ -51,10 +51,10 @@ def cmd_drip(a) -> int:
     root = repo_root()
     if a.dry_run:
         tmp = Path(tempfile.mkdtemp(prefix="archangel-dry-"))
-        for d in ("Tengai", "drips"):
+        for d in ("Tenro", "drips"):
             if (root / d).is_dir():
                 shutil.copytree(root / d, tmp / d)
-        for f in ("tengoku.pin", "Tengai.lean"):
+        for f in ("tengoku.pin", "Tenro.lean"):
             if (root / f).exists():
                 shutil.copy(root / f, tmp / f)
         cfg = drip.Config(tmp, root / ".tengoku", a.budget, a.model, Limits(a.max_depth, a.breadth), "dry", a.breadth)
@@ -71,7 +71,7 @@ def cmd_drip(a) -> int:
 
 def cmd_root(_a) -> int:
     root = repo_root()
-    (root / "Tengai.lean").write_text(tree.root_file(tree.scan(root)))
+    (root / "Tenro.lean").write_text(tree.root_file(tree.scan(root)))
     return 0
 
 
@@ -148,7 +148,7 @@ def fulfil(root: Path, q: Queue, qpath: Path, a) -> int:
     if " ".join(item["statement"].split()) not in flat:
         print("the file does not contain the request's statement verbatim", file=sys.stderr)
         return 1
-    dest = f"Tengai/Proved/R{item['id']}.lean"
+    dest = f"Tenro/Proved/R{item['id']}.lean"
     cfg = drip.Config(root, root / ".tengoku")
     gates = [gate.LeakIVGate(), gate.LakeGate(root)]
     out = drip.land_candidates(cfg, [{"path": dest, "content": text, "lens": a.who, "purpose": f"proof of request {a.id}"}], gates)
@@ -157,7 +157,7 @@ def fulfil(root: Path, q: Queue, qpath: Path, a) -> int:
         return 1
     q.fulfil(a.id, dest)
     q.save(qpath)
-    (root / "Tengai.lean").write_text(tree.root_file(tree.scan(root)))
+    (root / "Tenro.lean").write_text(tree.root_file(tree.scan(root)))
     return 0
 
 

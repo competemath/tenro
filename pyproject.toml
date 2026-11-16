@@ -1,7 +1,7 @@
 [project]
 name = "anomalous-archangel"
 version = "1.0.0"
-description = "The drip that studies Tengai as a working mathematician and is sovereign over it"
+description = "The drip that studies Tenro as a working mathematician and is sovereign over it"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 

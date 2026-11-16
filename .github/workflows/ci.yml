@@ -1,4 +1,4 @@
-# Tengai's gate on a pull request: Python lint and tests, sign-off, and the Lean tree built against Tengoku's published cache with every
+# Tenro's gate on a pull request: Python lint and tests, sign-off, and the Lean tree built against Tengoku's published cache with every
 # warning an error. `ci` is the one job to require. Nothing here has a secret, and nothing a PR supplies runs with a write token.
 name: ci
 on:
@@ -78,7 +78,7 @@ jobs:
       - name: The gate on the whole tree (lint, Lake with warnings as errors, the axiom audit)
         run: python -m anomalous_archangel gate
       - name: The root target
-        run: lake build Tengai
+        run: lake build Tenro
 
   ci:
     if: always()

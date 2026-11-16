@@ -1,24 +1,24 @@
 # anomalous-archangel
 
 An archangel is not an agent, a harness or a set of tools: it is the whole finished package. anomalous-archangel is the one that is
-sovereign over Tengai. On every **drip** it reads the entire tree the way a working mathematician reads a notebook, and then it changes the
+sovereign over Tenro. On every **drip** it reads the entire tree the way a working mathematician reads a notebook, and then it changes the
 tree.
 
 ## What a drip does
 
-1. **Map.** `tree.py` scans `Tengai/` (modules, imports, declarations, doc lines). `tengoku_view.py` reads the pinned Tengoku checkout
+1. **Map.** `tree.py` scans `Tenro/` (modules, imports, declarations, doc lines). `tengoku_view.py` reads the pinned Tengoku checkout
    (`.tengoku`) for what arrived lately and marks what looks like leak-archangel's work. `memory.py` supplies what earlier drips already said and
    when each lens last ran. `requests.py` supplies the open proof requests.
 2. **Choose lenses.** At most three (the breadth limit). Staleness rotates them; the state of the tree and the news pull some forward.
 3. **Spawn the angels.** Each angel is a `claude` process with a lens (`angels.py`):
    *cartographer* (understand and map), *abstractor* (3-d → n-d, discrete → real, finite → infinite, commutative → general),
-   *bridger* (connect distant pieces, inside Tengai and to Tengoku), *experimenter* (small cases, patterns, counterexamples, observations),
+   *bridger* (connect distant pieces, inside Tenro and to Tengoku), *experimenter* (small cases, patterns, counterexamples, observations),
    *illustrator* (pictures), *historian* (what arrived and what it changes for other mathematics). An angel may send up to three helpers one
    level down; a helper cannot send anyone.
 4. **Examine.** A last wave, the *examiner*, reads everything the angels claimed and says keep / drop / revise for each item.
 5. **Forget repeats.** A finding too close to something in memory (Jaccard on word sets, 0.55) is dropped and counted.
 6. **Land Lean.** Each proposed file goes through the gate (below). A file the gate refuses is put back exactly as it was. The root file
-   `Tengai.lean` is regenerated.
+   `Tenro.lean` is regenerated.
 7. **Queue proof requests.** A statement the angels want proved is compiled by Leak IV as `theorem t : <statement> := by sorry` (the `sorry`
    warning is the only one forgiven). It enters `drips/requests.json` as `open` if it elaborates, `unchecked` if no gate could say.
 8. **Write down.** `drips/<id>/record.json`, `drips/<id>/report.md`, `drips/index.json`, `drips/memory.json`.
@@ -40,8 +40,8 @@ without a label.
 
 1. `lint`: no `sorry`, `admit`, `axiom`, `opaque`, `native_decide`, `unsafe`, `partial`, `implemented_by`, `extern`, no code that runs at
    elaboration (`#eval`, `run_cmd`, `initialize`), no global notation, syntax or macros (a library that leaks notation breaks everyone who
-   imports it: Tengoku's canary exists because of one), no switched-off linters, no global instances, imports only `Tengoku.All` and `Tengai.*`.
-2. `leak-iv`: the file and everything of Tengai it needs, as one script, compiled by Leak IV (`verify_full_script`): no errors, no warnings.
+   imports it: Tengoku's canary exists because of one), no switched-off linters, no global instances, imports only `Tengoku.All` and `Tenro.*`.
+2. `leak-iv`: the file and everything of Tenro it needs, as one script, compiled by Leak IV (`verify_full_script`): no errors, no warnings.
 3. `lake`: `lake build` of the module and of every module that depends on it, against Tengoku at the pin; `warningAsError` is on, so a
    warning (including `sorry`) is an error; then `#print axioms` of every theorem: only `propext`, `Classical.choice`, `Quot.sound`.
 
@@ -71,7 +71,7 @@ python -m anomalous_archangel drip --dry-run      # a fake agent and a fake gate
 python -m anomalous_archangel drip --budget 8     # live: needs the claude CLI, a login (or CLAUDE_CODE_OAUTH_TOKEN) and .tengoku (scripts/tengoku-setup.sh)
 python -m anomalous_archangel drip --no-land      # study only
 python -m anomalous_archangel gate [--leak-iv]    # the gate on the whole tree as it is
-python -m anomalous_archangel root                # regenerate Tengai.lean
+python -m anomalous_archangel root                # regenerate Tenro.lean
 python -m anomalous_archangel status
 python -m anomalous_archangel requests list|claim|fulfil|abandon <id>
 ```
@@ -84,7 +84,7 @@ started, mode, summary, counts, spent_usd, tree, tengoku_pin, lenses, top: [{kin
 Both are read from `raw.githubusercontent.com`.
 
 **For leak-archangel.** Take an `open` request: `requests claim <id>`; prove the statement (the file must contain the statement verbatim and
-import `Tengoku.All`); `requests fulfil <id> --file proof.lean` runs the same gate, writes `Tengai/Proved/R<id>.lean` and marks the request
+import `Tengoku.All`); `requests fulfil <id> --file proof.lean` runs the same gate, writes `Tenro/Proved/R<id>.lean` and marks the request
 `proved`. Or abandon it with a reason.
 
 ## Not done, on purpose

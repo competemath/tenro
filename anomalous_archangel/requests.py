@@ -1,6 +1,6 @@
 """The queue of statements anomalous-archangel wants proved, for leak-archangel (or anyone) to take.
 
-unchecked -> open -> claimed -> proved (a file under Tengai/ that passed the gate), or abandoned. A statement is a Lean proposition; the request holds it as
+unchecked -> open -> claimed -> proved (a file under Tenro/ that passed the gate), or abandoned. A statement is a Lean proposition; the request holds it as
 text and records that the gate saw it elaborate (with `sorry` as its only warning) before it was queued.
 """
 

@@ -6,7 +6,7 @@ import Tengoku.All
 The second abstraction seed. The statement is about a commutative ring `R`; the odd numbers are `2 * i + 1`.
 -/
 
-namespace Tengai
+namespace Tenro
 
 /-- `1 + 3 + … + (2 * n - 1) = n ^ 2`, in any commutative ring. -/
 theorem sum_range_odd (R : Type*) [CommRing R] (n : ℕ) :
@@ -18,4 +18,4 @@ theorem sum_range_odd (R : Type*) [CommRing R] (n : ℕ) :
     push_cast
     ring
 
-end Tengai
+end Tenro

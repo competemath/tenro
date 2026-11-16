@@ -1,6 +1,6 @@
 """The one thing an angel hands back: a closed JSON object, parsed and bounded here, never trusted.
 
-An angel's final message ends with a single ```json block. Unknown keys are refused, every text is capped, a path must be under Tengai/, and
+An angel's final message ends with a single ```json block. Unknown keys are refused, every text is capped, a path must be under Tenro/, and
 the label of a claim is one of three words: `note` (a plain statement about what is there), `observation` (something seen in a small case or
 a computation) or `conjecture` (believed, not proved). The word `verified` is not available to an angel: only a Lean file that passed the
 gate is verified, and the archangel says so, not the angel.
@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 KINDS = ("note", "conjecture", "observation", "picture", "impact", "abstraction", "bridge")
 LABELS = ("note", "observation", "conjecture")
 KEYS = {"findings", "lean_files", "requests", "delegate", "verdicts", "summary"}
-PATH = re.compile(r"^Tengai/[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*\.lean$")
+PATH = re.compile(r"^Tenro/[A-Za-z0-9_]+(/[A-Za-z0-9_]+)*\.lean$")
 FENCE = re.compile(r"```json\s*\n(.*?)\n```", re.S)
 CAPS = {
     "title": 120,
@@ -92,7 +92,7 @@ def parse(text: str, allow_delegate: bool = True) -> Proposal:
     for lf in data.get("lean_files", []):
         lf = _only(lf, {"path", "content", "purpose"}, "lean file")
         if not isinstance(lf.get("path"), str) or not PATH.match(lf["path"]):
-            raise BadProposal("a Lean file's path must be Tengai/<Area>/<Name>.lean")
+            raise BadProposal("a Lean file's path must be Tenro/<Area>/<Name>.lean")
         out.lean_files.append({"path": lf["path"], "content": _text(lf, "content"), "purpose": _text(lf, "purpose")})
     for r in data.get("requests", []):
         r = _only(r, {"statement", "informal", "why"}, "request")

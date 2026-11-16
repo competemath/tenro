@@ -1,23 +1,17 @@
 # How content moves
 
 ```
-leak-archangel ──proofs──▶  Tengai  ──settled──▶  Tengoku
-      ▲                       │  ▲
-      │                       │  │ reads, studies, rewrites
-      └──proof requests───────┘  └── anomalous-archangel (the drip)
+tengoku (frozen source)  ->  tenro (this repository)  ->  tengai (clean core)
+   audited intake              overlay + core/ + harvest        one canonical form, one proof per statement
 ```
 
-**Into Tengai.** Two ways. leak-archangel proves an `open` request (`python -m anomalous_archangel requests fulfil`), and the file lands after the
-same gate as the archangel's own. Or a person opens a pull request: `ci` builds the tree with warnings as errors.
+Content moves one way. Nothing in Tenro is imported by Tengai, and Tengoku receives nothing from either (Tengai's `docs/adr/0001-roles-and-flow.md`).
 
-**Inside Tengai.** anomalous-archangel rewrites freely. Names, modules and statements move; that is the point of the upstream. Nothing outside
-Tengai may depend on a Tengai name staying put.
+**Into Tenro.**
+- `core/` is Tengai at a tag, byte for byte (`core.lock`, `tools/mirror/mirror.py`; invariant I6). It changes only by `mirror.py sync TAG`, or on a hypothesis branch through `hyp/<id>/core.patch`.
+- `tengoku.pin` names the Tengoku commit the overlay is built against; its compiled cache is Tengoku's own release asset (`scripts/tengoku-setup.sh`).
+- `harvest/` (not built yet) holds kernel-checked partial subgoals from **non-evaluation** intake runs only (invariant I8).
 
-**Out of Tengai.** Tengoku is the store that does not change. A Tengai module is *settled* when it has stood unchanged through several drips,
-its theorems rest on the three classical axioms only, and the gate is clean. Settled content reaches Tengoku the way every contribution does,
-through its pull request gate and the memory-intake pipeline of emissary-archangel (a person approves). This repository does not push to
-Tengoku and holds no token that could.
+**Inside Tenro.** The overlay, `Tenro/`, is where `anomalous-archangel` (the drip) writes freely: names, modules and statements move, and nothing outside Tenro may depend on a Tenro name staying put. It imports Tengoku (`Tengoku.All`) and itself; the clean core is not imported by the drip's gate, because the proof gate (Leak IV) knows Tengoku only.
 
-**Tengoku into Tengai.** `tengoku.pin` names the commit of Tengoku Tengai is built against; its compiled cache is Tengoku's own release asset.
-`scripts/tengoku-setup.sh --latest` moves the pin to the newest published cache. The drip does that before it reads, so it studies the newest
-Tengoku, and commits the new pin with its files.
+**Out of Tenro.** A hypothesis is a branch `hyp/<id>` with `hyp/<id>/manifest.json` (change, metric, expected effect, sample size, fixed before any run) and `hyp/<id>/core.patch`. It is promoted to Tengai only on a net Pareto improvement on held-out problems, as that patch, which a daily dry run keeps applicable to Tengai's main. The promoted theorems are re-proved inside Tengai's own cone; each carries `source_id` and a proof that the canonical statement is equivalent to its source (the promotion lens, ADR-0003). This repository holds no token that could push to Tengoku.

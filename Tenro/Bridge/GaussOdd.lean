@@ -1,16 +1,16 @@
 import Tengoku.All
-import Tengai.Seed.Gauss
-import Tengai.Seed.OddSum
+import Tenro.Seed.Gauss
+import Tenro.Seed.OddSum
 
 /-!
 # A bridge: the odd sum is Gauss' sum, twice, plus `n`
 
-`Tengai.Seed.Gauss` and `Tengai.Seed.OddSum` were proved separately and by the same induction. The bridge shows they are
+`Tenro.Seed.Gauss` and `Tenro.Seed.OddSum` were proved separately and by the same induction. The bridge shows they are
 one fact: the odd sum is `2 * (0 + 1 + … + (n - 1)) + n`, and Gauss' sum turns that into `n ^ 2`. It is a second proof of
-`Tengai.sum_range_odd` that goes through `Tengai.sum_range_mul_two` instead of repeating the induction.
+`Tenro.sum_range_odd` that goes through `Tenro.sum_range_mul_two` instead of repeating the induction.
 -/
 
-namespace Tengai
+namespace Tenro
 
 /-- The odd sum split into twice the Gauss sum and `n` ones. -/
 theorem sum_range_odd_split (R : Type*) [CommRing R] (n : ℕ) :
@@ -24,4 +24,4 @@ theorem sum_range_odd_of_gauss (R : Type*) [CommRing R] (n : ℕ) :
   rw [sum_range_odd_split]
   linear_combination sum_range_mul_two R n
 
-end Tengai
+end Tenro

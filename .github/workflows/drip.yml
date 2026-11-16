@@ -1,5 +1,5 @@
 # The drip: anomalous-archangel studies the tree and acts on it (docs/anomalous-archangel.md). Scheduled, or by hand.
-# It needs the repository secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R competemath/tengai`).
+# It needs the repository secret CLAUDE_CODE_OAUTH_TOKEN (`claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R competemath/tenro`).
 # Without it the run says so and ends green: a missing secret is not a failed drip. A dry run needs no secret and spends nothing.
 # Every Lean file the archangel writes passed the gate (lint, Leak IV, Lake with warnings as errors) before it was kept; the whole tree is
 # gated once more here, and only then are the drip's files committed to main.
@@ -99,7 +99,7 @@ jobs:
         run: |
           git config user.name "anomalous-archangel[bot]"
           git config user.email "anomalous-archangel@users.noreply.github.com"
-          git add Tengai Tengai.lean drips tengoku.pin
+          git add Tenro Tenro.lean drips tengoku.pin
           if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
           id="$(python -c 'import json; print(json.load(open("drips/index.json"))["drips"][0]["id"])')"
           git commit -q -s -m "drip $id" -m "Written by anomalous-archangel. Every Lean file passed the gate; the report is drips/$id/report.md."

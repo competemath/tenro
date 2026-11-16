@@ -9,13 +9,13 @@ import pytest
 from anomalous_archangel import gate, tree
 
 ROOT = Path(__file__).resolve().parent.parent
-OK_FILE = "import Tengoku.All\n\nnamespace Tengai\n\ntheorem foo (n : ℕ) : n = n := rfl\n\nend Tengai\n"
+OK_FILE = "import Tengoku.All\n\nnamespace Tenro\n\ntheorem foo (n : ℕ) : n = n := rfl\n\nend Tenro\n"
 
 
 def test_lint_accepts_a_clean_file_and_ignores_comments_and_strings():
-    assert gate.lint("Tengai/A.lean", OK_FILE).ok
+    assert gate.lint("Tenro/A.lean", OK_FILE).ok
     noisy = OK_FILE + '-- sorry axiom\n/- native_decide /- nested sorry -/ still comment -/\ndef s : String := "sorry axiom"\n'
-    assert gate.lint("Tengai/A.lean", noisy).ok
+    assert gate.lint("Tenro/A.lean", noisy).ok
 
 
 @pytest.mark.parametrize(
@@ -37,11 +37,11 @@ def test_lint_accepts_a_clean_file_and_ignores_comments_and_strings():
     ],
 )
 def test_lint_refuses(bad):
-    assert not gate.lint("Tengai/A.lean", OK_FILE + "\n" + bad + "\n").ok
+    assert not gate.lint("Tenro/A.lean", OK_FILE + "\n" + bad + "\n").ok
 
 
 def test_local_and_scoped_notation_are_fine():
-    assert gate.lint("Tengai/A.lean", OK_FILE + '\nlocal notation "ff" => Nat.succ\nscoped infixl:65 " +++ " => Nat.add\n').ok
+    assert gate.lint("Tenro/A.lean", OK_FILE + '\nlocal notation "ff" => Nat.succ\nscoped infixl:65 " +++ " => Nat.add\n').ok
 
 
 def test_a_file_must_import_tengoku_and_be_small():
@@ -59,22 +59,22 @@ def test_verdicts():
 
 
 def test_axiom_audit():
-    out = "'Tengai.a' depends on axioms: [propext, Classical.choice, Quot.sound]\n'Tengai.b' depends on axioms: [sorryAx]\n'Tengai.c' does not depend on any axioms"
-    assert gate.axiom_problems(out) == ["Tengai.b rests on ['sorryAx']"]
-    assert gate.axiom_problems("error: unknown constant 'Tengai.z'")
+    out = "'Tenro.a' depends on axioms: [propext, Classical.choice, Quot.sound]\n'Tenro.b' depends on axioms: [sorryAx]\n'Tenro.c' does not depend on any axioms"
+    assert gate.axiom_problems(out) == ["Tenro.b rests on ['sorryAx']"]
+    assert gate.axiom_problems("error: unknown constant 'Tenro.z'")
 
 
 def _mini_tree(tmp_path):
-    (tmp_path / "Tengai").mkdir()
-    (tmp_path / "Tengai" / "A.lean").write_text("import Tengoku.All\n\nnamespace Tengai\ndef a := 1\nend Tengai\n")
-    (tmp_path / "Tengai" / "B.lean").write_text("import Tengoku.All\nimport Tengai.A\n\nnamespace Tengai\ndef b := a + 1\nend Tengai\n")
+    (tmp_path / "Tenro").mkdir()
+    (tmp_path / "Tenro" / "A.lean").write_text("import Tengoku.All\n\nnamespace Tenro\ndef a := 1\nend Tenro\n")
+    (tmp_path / "Tenro" / "B.lean").write_text("import Tengoku.All\nimport Tenro.A\n\nnamespace Tenro\ndef b := a + 1\nend Tenro\n")
     return tree.scan(tmp_path)
 
 
 def test_the_closure_script_is_one_header_and_sectioned_bodies(tmp_path):
-    s = gate.closure_script(_mini_tree(tmp_path), "Tengai.B")
+    s = gate.closure_script(_mini_tree(tmp_path), "Tenro.B")
     assert s.count("import ") == 1 and s.startswith("import Tengoku.All")
-    assert s.index("section Tengai_A") < s.index("def a") < s.index("end Tengai_A") < s.index("section Tengai_B") < s.index("def b")
+    assert s.index("section Tenro_A") < s.index("def a") < s.index("end Tenro_A") < s.index("section Tenro_B") < s.index("def b")
 
 
 def test_leak_iv_gate_with_a_fake_caller(tmp_path):
@@ -86,18 +86,18 @@ def test_leak_iv_gate_with_a_fake_caller(tmp_path):
         return "Compilation Successful"
 
     g = gate.LeakIVGate(caller=caller)
-    assert g.check(tm, ["Tengai.B"]).ok and seen[0][1] == "verify_full_script"
+    assert g.check(tm, ["Tenro.B"]).ok and seen[0][1] == "verify_full_script"
     bad = gate.LeakIVGate(caller=lambda *a: "Line 1 (Error): no")
-    assert bad.check(tm, ["Tengai.B"]).kind == "failed"
+    assert bad.check(tm, ["Tenro.B"]).kind == "failed"
 
     def down(*a):
         raise gate.Unreachable("down")
 
-    assert gate.LeakIVGate(caller=down, retries=1).check(tm, ["Tengai.B"]).kind == "infra"
+    assert gate.LeakIVGate(caller=down, retries=1).check(tm, ["Tenro.B"]).kind == "infra"
 
 
 def test_lake_gate_without_tengoku_is_infra_not_ok(tmp_path):
-    assert gate.LakeGate(tmp_path).check(_mini_tree(tmp_path), ["Tengai.A"]).kind == "infra"
+    assert gate.LakeGate(tmp_path).check(_mini_tree(tmp_path), ["Tenro.A"]).kind == "infra"
 
 
 def test_lake_gate_reads_the_build_output(tmp_path):
@@ -110,14 +110,14 @@ def test_lake_gate_reads_the_build_output(tmp_path):
             return subprocess.CompletedProcess(cmd, 0, "Lake", "")
         if cmd[:2] == ["lake", "build"]:
             return subprocess.CompletedProcess(cmd, 0, warning, "")
-        return subprocess.CompletedProcess(cmd, 0, "'Tengai.a' depends on axioms: [propext]", "")
+        return subprocess.CompletedProcess(cmd, 0, "'Tenro.a' depends on axioms: [propext]", "")
 
-    warning = "warning: Tengai/A.lean:3:4: unused variable `x`"
-    r = gate.LakeGate(tmp_path, runner).check(tm, ["Tengai.A"])
-    assert r.kind == "failed" and "Tengai/A.lean" in r.errors[0]
-    # Lake replays the saved warnings of Tengoku's own modules on every build: those are not Tengai's
+    warning = "warning: Tenro/A.lean:3:4: unused variable `x`"
+    r = gate.LakeGate(tmp_path, runner).check(tm, ["Tenro.A"])
+    assert r.kind == "failed" and "Tenro/A.lean" in r.errors[0]
+    # Lake replays the saved warnings of Tengoku's own modules on every build: those are not Tenro's
     warning = "warning: Tengoku/LeanPool/Foo.lean:365:66: This simp argument is unused:"
-    assert gate.LakeGate(tmp_path, runner).check(tm, ["Tengai.A"]).kind == "ok"
+    assert gate.LakeGate(tmp_path, runner).check(tm, ["Tenro.A"]).kind == "ok"
 
 
 def test_run_gates_stops_at_the_first_failure_and_needs_one():
