@@ -42,7 +42,7 @@ jobs:
           (cd "$RUNNER_TEMP/scrambled" && lake build 2>&1 | tail -40)
       - name: No original identifier is left, and the file count is the same
         run: |
-          for w in Fx Lib Problem Pt swap swap_swap double double_eq double_add add_x with_where aux problem_double_swap; do
+          for w in Fx Lib Challenge Pt swap swap_swap double double_eq double_add add_x with_where aux problem_double_swap; do
             if grep -rqw --include='*.lean' --include='lakefile.toml' --exclude-dir=.lake -e "$w" "$RUNNER_TEMP/scrambled"; then echo "::error::$w is still there"; exit 1; fi
           done
           test "$(find "$RUNNER_TEMP/scrambled" -name '*.lean' -not -path '*/.lake/*' | wc -l)" = "$(find tools/scramble/fixture -name '*.lean' -not -path '*/.lake/*' | wc -l)"

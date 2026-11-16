@@ -9,7 +9,7 @@
 What is scrambled. BOTH the library's identifiers and the problem's, so that a prover can use neither a memorised library lemma name nor a memorised problem name. The unit is the COMPONENT of a name
 (`Nat.succ_le` has the components `Nat` and `succ_le`): one global map component -> fresh component, applied to every identifier token of every file of the scrambled copy, so that namespaces,
 `open`, dot notation and `export` resolve exactly as before (a name's meaning never depends on which spelling its component has, only on the components being the same everywhere).
-What is kept: every component of a name that Lean's core (Init, Std, Lean) defines, whatever else uses it (the core is not scrambled: the prover is told to use it), every reserved token of Lean's
+What is kept: every component of a name that Lean's core (Init, Std, Lean) defines, whatever else uses it (a library name that is also a core word, like `Problem`, is NOT scrambled: `map` reports how many) (the core is not scrambled: the prover is told to use it), every reserved token of Lean's
 parser (keywords, tactic names, attribute names: `--reserved`, from Lean's own token table in CI), and everything that is not an identifier (numbers, strings, operators). Comments and docstrings are
 DROPPED from the scrambled copy: they spell the original names in prose.
 The fresh name is `x` + the first 16 hex digits of HMAC-SHA256(key, component): reproducible from the key, which stays with the owner and never enters this repository (design: the scrambled problems and
@@ -158,7 +158,13 @@ def main(argv: list[str] | None = None) -> int:
     if argv and argv[0] == "map" and "--names" in argv:
         opts = dict(zip(argv[1::2], argv[2::2], strict=False))
         lib, core, reserved = read_names(opts["--names"])
-        print(json.dumps(build_map(lib, [], core, reserved, Path(opts["--key-file"]).read_bytes().strip()), indent=0, sort_keys=True))
+        mapping = build_map(lib, [], core, reserved, Path(opts["--key-file"]).read_bytes().strip())
+        unscrambled = components(lib) - set(mapping)
+        print(
+            f"scramble: {len(mapping)} components scrambled, {len(unscrambled)} kept because the core or the parser owns the same word: {sorted(unscrambled)[:20]}",
+            file=sys.stderr,
+        )
+        print(json.dumps(mapping, indent=0, sort_keys=True))
         return 0
     if len(argv) == 5 and argv[0] == "copy" and argv[3] == "--map":
         print(copy_tree(Path(argv[1]), Path(argv[2]), json.loads(Path(argv[4]).read_text(encoding="utf-8"))))
