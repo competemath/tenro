@@ -1,0 +1,126 @@
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools" / "tawatur"))
+import admit as A  # noqa: E402
+
+
+def route(name, footprint, waypoints, size=None):
+    return {"name": name, "footprint": set(footprint), "waypoints": set(waypoints), "size": size if size is not None else len(footprint)}
+
+
+def block(prefix, n):
+    return {f"{prefix}{i}" for i in range(n)}
+
+
+R1 = route("r1", block("a", 10), block("wa", 4))
+R2 = route("r2", block("b", 10), block("wb", 4))
+R3 = route("r3", block("c", 10), block("wc", 4))
+R4 = route("r4", block("d", 10), block("wd", 4))
+ALIAS = route("alias", block("a", 9) | {"z"}, block("wa", 4))
+
+
+class Distance(unittest.TestCase):
+    def test_jaccard_distance(self):
+        self.assertEqual(A.distance({"a", "b"}, {"a", "b"}), 0.0)
+        self.assertEqual(A.distance({"a"}, {"b"}), 1.0)
+        self.assertAlmostEqual(A.distance({"a", "b"}, {"b", "c"}), 2 / 3)
+        self.assertEqual(A.distance(set(), set()), 0.0)
+
+    def test_divergence_needs_both_axes(self):
+        same_footprint_new_waypoints = route("x", R1["footprint"], block("wz", 4))
+        self.assertFalse(A.diverge(R1, same_footprint_new_waypoints, 0.5, 0.5))
+        self.assertTrue(A.diverge(R1, R2, 0.5, 0.5))
+
+
+class Admission(unittest.TestCase):
+    def test_a_near_copy_is_rejected_and_a_new_route_added(self):
+        self.assertEqual(A.admit([R1], ALIAS, 0.5, 0.5)[1], "rejected")
+        folder, decision, _ = A.admit([R1], R2, 0.5, 0.5)
+        self.assertEqual((decision, [r["name"] for r in folder]), ("added", ["r1", "r2"]))
+
+    def test_must_diverge_from_every_stored_route(self):
+        near_r2 = route("n", block("b", 9) | {"q"}, block("wb", 4))
+        self.assertEqual(A.admit([R1, R2], near_r2, 0.5, 0.5)[1], "rejected")
+
+    def test_full_folder_keeps_the_best_triple(self):
+        # r4 shares half its footprint with r1, so it diverges from all but is closer to r1 than r2, r3 are to each other
+        close = route("close", block("a", 5) | block("d", 5), block("wa", 2) | block("wd", 2), size=40)
+        folder, decision, evicted = A.admit([R1, R2, R3], close, 0.3, 0.3)
+        self.assertEqual(decision, "kept")
+        self.assertEqual(folder, [R1, R2, R3])
+        self.assertIsNone(evicted)
+        folder, decision, evicted = A.admit([R1, R2, close], R3, 0.3, 0.3)
+        self.assertEqual(decision, "replaced")
+        self.assertEqual(evicted["name"], "close")
+        self.assertEqual(sorted(r["name"] for r in folder), ["r1", "r2", "r3"])
+
+    def test_ties_go_to_the_more_compact_route(self):
+        big = route("big", block("c", 10), block("wc", 4), size=100)
+        small = route("small", block("c", 10) | set(), block("wc", 4), size=20)
+        folder, decision, _ = A.admit([R1, R2, big], route("small2", block("e", 10), block("we", 4), size=20), 0.5, 0.5)
+        self.assertEqual(decision, "replaced")
+        self.assertNotIn("big", [r["name"] for r in folder])
+        self.assertEqual(small["size"], 20)
+
+
+class Status(unittest.TestCase):
+    def test_three_pairwise_divergent_routes_with_substance(self):
+        s = A.status([R1, R2, R3], 0.5, 0.5)
+        self.assertTrue(s["tawatur"])
+        self.assertEqual(s["pairwise_divergent"], ["r1", "r2", "r3"])
+
+    def test_two_routes_or_a_copy_do_not_make_it(self):
+        self.assertFalse(A.status([R1, R2], 0.5, 0.5)["tawatur"])
+        self.assertFalse(A.status([R1, R2, ALIAS], 0.5, 0.5)["tawatur"])
+
+    def test_substance_floor(self):
+        tiny = route("tiny", {"t1", "t2"}, {"w1"})
+        s = A.status([R1, R2, tiny], 0.5, 0.5)
+        self.assertFalse(s["tawatur"])
+        self.assertEqual(s["with_substance"], 2)
+
+
+class Calibration(unittest.TestCase):
+    def test_separable_labels_are_feasible_and_the_thresholds_separate_them(self):
+        pairs = [
+            (0.1, 0.2, "alias"),
+            (0.3, 0.6, "alias"),
+            (0.5, 0.1, "alias"),
+            (0.8, 0.9, "independent"),
+            (0.7, 0.8, "independent"),
+            (0.5, 0.5, "similar"),
+        ]
+        r = A.calibrate(pairs)
+        self.assertTrue(r["feasible"])
+        for df, dw, lab in pairs:
+            ok = df >= r["a"] and dw >= r["b"]
+            if lab == "alias":
+                self.assertFalse(ok)
+            if lab == "independent":
+                self.assertTrue(ok)
+        self.assertGreater(r["slack"], 0)
+
+    def test_inseparable_labels_are_reported_not_hidden(self):
+        r = A.calibrate([(0.9, 0.9, "alias"), (0.1, 0.1, "independent")])
+        self.assertFalse(r["feasible"])
+        self.assertGreaterEqual(r["violations"], 1)
+
+    def test_the_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "pairs.jsonl").write_text(
+                json.dumps({"df": 0.1, "dw": 0.1, "label": "alias"})
+                + "\n"
+                + json.dumps({"df": 0.9, "dw": 0.9, "label": "independent"})
+                + "\n"
+            )
+            self.assertEqual(A.main(["calibrate", str(d / "pairs.jsonl")]), 0)
+            self.assertEqual(A.main([]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
