@@ -25,6 +25,8 @@ class SummaryTest(unittest.TestCase):
         self.assertIn("## `g1` (independent)", text)
         self.assertNotIn("g2", text)
         self.assertIn("Tags read from the sources: 7", text)
+        stats = {"groups": 11, "single_library_groups": 6, "cross_library_groups": 5, "selected_groups": 2, "selected_theorems": 8}
+        self.assertIn("6 have theorems from one library only", summary.render(groups, 7, stats))
 
 
 if __name__ == "__main__":

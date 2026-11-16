@@ -48,7 +48,10 @@ jobs:
           wc -l ../isnad.tsv ../isnad-failed.txt
       - name: The group table and the names to export
         run: |
-          python3 tools/calibration/groups.py meta --dup dup.json --isnad-py .tengoku/scripts/isnad.py < isnad.tsv > meta.tsv
+          python3 tools/calibration/groups.py meta --dup dup.json --isnad-py .tengoku/scripts/isnad.py < isnad.tsv > meta-all.tsv
+          # only groups with theorems from two or more libraries can be other than alias (rule 1); a deterministic sample of them is exported (the export of all would not fit in memory)
+          python3 tools/calibration/groups.py select --max-groups 150 --stats groups-stats.json < meta-all.tsv > meta.tsv
+          cat groups-stats.json
           cut -f1 meta.tsv > names.txt
           cut -f4 meta.tsv | sort -u > export-modules.txt
           wc -l meta.tsv names.txt export-modules.txt
@@ -72,13 +75,15 @@ jobs:
       - name: Label by the written protocol and summarise
         run: |
           python3 tools/calibration/label.py --input closures.jsonl > labels.jsonl
-          python3 tools/calibration/summary.py labels.jsonl --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary.md >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/calibration/summary.py labels.jsonl --stats groups-stats.json --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: calibration
           path: |
             dup.json
             meta.tsv
+            meta-all.tsv
+            groups-stats.json
             closures.jsonl
             tawatur-report.jsonl
             labels.jsonl
