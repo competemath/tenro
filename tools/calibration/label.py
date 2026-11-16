@@ -25,7 +25,7 @@ def load_params(path: Path) -> dict:
 
 def _outside(rec: dict, forced: list[str]) -> set[str]:
     modules = rec.get("modules") or {}
-    own = set(rec.get("statement_closure") or [])
+    own = set(rec.get("statement_constants") or rec.get("statement_closure") or [])
     keep = set()
     for c in rec["closure"]:
         mod = modules.get(c, "")
@@ -49,7 +49,10 @@ def label_pair(a: dict, b: dict, p: dict) -> dict:
     j = _jaccard(ca, cb)
     margin = p["borderline_margin"]
     near = abs(j - p["alias_jaccard_min"]) <= margin or abs(j - p["independent_jaccard_max"]) <= margin
-    same_chain = a["lib"] == b["lib"] or _uses(a, b) or _uses(b, a) or (a.get("from") and a.get("from") == b.get("from"))
+    collection = a["lib"] == b["lib"] and a["lib"] in p.get("collections", [])
+    same_chain = (
+        (a["lib"] == b["lib"] and not collection) or _uses(a, b) or _uses(b, a) or (a.get("from") and a.get("from") == b.get("from"))
+    )
     floor = p["substance_floor"]
     if same_chain:
         label, rule, border = "alias", "same-chain", False

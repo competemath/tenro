@@ -280,6 +280,7 @@ class Statement(unittest.TestCase):
         b.decl("thm", "thm1", b.const("d"), b.const("P"))  # the statement mentions d, which reaches R
         r = cl.records(load(b), ["thm1"], {})[0]
         self.assertEqual(set(r["statement_closure"]), {"d", "R", "T"})
+        self.assertEqual(set(r["statement_constants"]), {"d"})  # only what the type mentions; R and T are reached through the definition d
         self.assertEqual(set(r["closure"]), {"d", "P", "R", "T"})
 
     def test_equal_statements_share_the_fallback_id(self):
@@ -341,7 +342,7 @@ class Format(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         rows = [json.loads(x) for x in r.stdout.splitlines()]
         self.assertEqual([x["name"] for x in rows], ["thm1"])
-        self.assertEqual(set(rows[0]), {"id", "lib", "name", "closure", "statement_closure"})
+        self.assertEqual(set(rows[0]), {"id", "lib", "name", "closure", "statement_closure", "statement_constants"})
 
 
 if __name__ == "__main__":
