@@ -40,5 +40,34 @@ class GroupsTest(unittest.TestCase):
         self.assertEqual(rows, [("T.a", "id1", "A", "Tengoku.A.M"), ("T.z", "id1", "B", "Tengoku.B.M")])
 
 
+class Select(unittest.TestCase):
+    def rows(self):
+        r = []
+        for g in range(10):
+            r += [
+                (f"A{g}.t", f"id{g}", "libA", "M"),
+                (f"B{g}.t", f"id{g}", "libB", "M"),
+                (f"C{g}.t", f"id{g}", "libA", "M"),
+                (f"D{g}.t", f"id{g}", "libC", "M"),
+                (f"E{g}.t", f"id{g}", "libD", "M"),
+            ]
+        r += [("S1.t", "same", "libA", "M"), ("S2.t", "same", "libA", "M")]  # one library only: alias by rule 1, no closure needed
+        return r
+
+    def test_single_library_groups_are_not_selected_and_are_counted(self):
+        chosen, stats = groups.select_groups(self.rows(), 100)
+        self.assertEqual({r[1] for r in chosen} & {"same"}, set())
+        self.assertEqual((stats["groups"], stats["single_library_groups"], stats["cross_library_groups"]), (11, 1, 10))
+
+    def test_sample_is_deterministic_capped_and_members_cut_with_one_per_library_first(self):
+        a, s = groups.select_groups(self.rows(), 3)
+        self.assertEqual(a, groups.select_groups(list(reversed(self.rows())), 3)[0])
+        self.assertEqual(s["selected_groups"], 3)
+        self.assertEqual(len(a), 12)  # 4 members each
+        for gid in {r[1] for r in a}:
+            libs = {r[2] for r in a if r[1] == gid}
+            self.assertEqual(libs, {"libA", "libB", "libC", "libD"})  # the four libraries, not two theorems of libA
+
+
 if __name__ == "__main__":
     unittest.main()
