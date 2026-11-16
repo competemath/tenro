@@ -71,9 +71,11 @@ jobs:
       - name: Reduced closures
         run: python3 tools/closure/closure.py export.ndjson --names-file names.txt --meta meta.tsv --modules core-modules.tsv > closures.jsonl
       - name: Waypoints (the ids of the statements of each proof's haves), when the pinned Tengoku can say them
+        continue-on-error: true   # a failure here must never cost the closures, the labels and the summary an hour of work
         run: |
-          if (cd .tengoku && lake env .lake/build/bin/tengoku-isnad --haves --import Init --module Init.Prelude >/dev/null 2>&1); then
-            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --extra-arg --haves --prefix isnad1-have)
+          # does the pinned tengoku-isnad know --haves? An unknown option is silently ignored by it, so ask the source, not the program
+          if grep -q -e '--haves' .tengoku/TengokuIsnad.lean; then
+            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --extra-arg=--haves --prefix isnad1-have)
             complete=""; [ -s haves-failed.txt ] || complete="--assume-complete"
             python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py .tengoku/scripts/isnad.py $complete > closures-wp.jsonl
             mv closures-wp.jsonl closures.jsonl
