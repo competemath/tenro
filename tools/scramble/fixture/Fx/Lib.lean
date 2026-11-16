@@ -1,4 +1,4 @@
-/-- A small library with namespaces, dot notation, `open`, an instance and a `where` lemma: the things a scramble must not break. -/
+/- A small library with namespaces, dot notation, `open`, an instance and a `where` lemma: the things a scramble must not break. -/
 namespace Fx
 
 structure Pt where

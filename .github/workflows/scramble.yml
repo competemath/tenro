@@ -28,7 +28,7 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: The fixture builds as it is
         working-directory: tools/scramble/fixture
-        run: lake build 2>&1 | tail -3
+        run: lake build 2>&1 | tail -40
       - name: The names Lean knows (library, core, parser tokens)
         working-directory: tools/scramble/fixture
         run: |
@@ -39,7 +39,7 @@ jobs:
           head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$RUNNER_TEMP/key"
           python3 tools/scramble/scramble.py map --names "$RUNNER_TEMP/names.tsv" --key-file "$RUNNER_TEMP/key" > "$RUNNER_TEMP/map.json"
           python3 tools/scramble/scramble.py copy tools/scramble/fixture "$RUNNER_TEMP/scrambled" --map "$RUNNER_TEMP/map.json"
-          (cd "$RUNNER_TEMP/scrambled" && lake build 2>&1 | tail -5)
+          (cd "$RUNNER_TEMP/scrambled" && lake build 2>&1 | tail -40)
       - name: No original identifier is left, and the file count is the same
         run: |
           for w in Fx Lib Problem Pt swap swap_swap double double_eq double_add add_x with_where aux problem_double_swap; do
