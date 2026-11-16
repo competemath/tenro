@@ -140,7 +140,9 @@ def selftest() -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) == 3 and argv[0] == "check":
-        problems = check(Path(argv[1]).read_text(encoding="utf-8", newline=""), Path(argv[2]).read_text(encoding="utf-8", newline=""))
+        problems = check(
+            Path(argv[1]).read_bytes().decode("utf-8"), Path(argv[2]).read_bytes().decode("utf-8")
+        )  # bytes: no newline translation
         for p in problems:
             print(p)
         return 1 if problems else 0
