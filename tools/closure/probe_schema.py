@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """probe_schema.py <export.ndjson> - print, for every kind of line of a lean4export file, a count and the first example. A tool for reading the
 format when it changes (the parser in closure.py pins version 3.x); it reads nothing but the file."""
+
 import json
 import sys
 from collections import Counter

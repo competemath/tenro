@@ -43,5 +43,11 @@ jobs:
           wc -l "$RUNNER_TEMP/fixture.ndjson"
       - name: The shape of every kind of line
         run: python3 tools/closure/probe_schema.py "$RUNNER_TEMP/fixture.ndjson"
+      - name: The extractor on the real export (what Fixture.lean says it must do)
+        env: { CLOSURE_FIXTURE_EXPORT: "${{ runner.temp }}/fixture.ndjson" }
+        run: |
+          python -m pip install -q pytest==8.4.1
+          python -m pytest -q tests/test_closure.py tests/test_closure_real.py
+          python3 tools/closure/closure.py "$RUNNER_TEMP/fixture.ndjson" --names Fx.swap_a Fx.swap_b Fx.swap_c Fx.double_eq | cut -c1-300
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with: { name: fixture-export, path: "${{ runner.temp }}/fixture.ndjson", retention-days: 7 }

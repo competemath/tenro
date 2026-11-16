@@ -30,6 +30,9 @@ theorem swap_e (p q : Prop) (h : p ∧ q) : q ∧ p := by
   have h2 : (p ∨ ¬p) ∨ False := Or.inl h1
   exact ⟨h.2, h.1⟩
 
+/-- the control: a proof that really applies the lemma, so the extractor must keep it -/
+theorem em_used (p : Prop) : p ∨ ¬p := Classical.em p
+
 /-- a theorem that reaches a definition through its statement and its proof -/
 theorem uses_double : double 2 = 4 := by decide
 
