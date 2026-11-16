@@ -1,9 +1,13 @@
 # Parameters of the rule-based labelling in PROTOCOL.md. Fixed here BEFORE any group is labelled; a change is a new file version and
 # every label is recomputed (labels are never edited by hand: only `human.jsonl` overrides, and each override names its reason).
-version = 1
+version = 2
 forced_layer_modules = ["Init", "Std", "Lean"]   # constants defined there are removed before any comparison (docs/tawatur.md, forced layer)
 substance_floor = 5                              # F: constants outside the forced layer and the statement's own; fewer = no independent proof
 alias_jaccard_min = 0.60                         # >= this closure similarity: alias
 independent_jaccard_max = 0.15                   # <= this (and every other independence condition): independent
 # the band between the two is "similar"; a pair within `borderline_margin` of either threshold is borderline and goes to a human
 borderline_margin = 0.05
+
+# Libraries that are COLLECTIONS of separately written solutions (one file or folder per problem, by different authors): two proofs from the same collection are not one chain, so rule 1 (same
+# library = same chain) does not apply to them; they are compared by their closures like proofs from two libraries. (calibration run 43911552807: Usa2013P5 and Usa2020P5, both Compfiles, overlap 0.01.)
+collections = ["Compfiles", "Imoshortlist"]

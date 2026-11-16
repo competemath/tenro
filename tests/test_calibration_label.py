@@ -58,5 +58,23 @@ class LabelTest(unittest.TestCase):
         self.assertEqual(out, label.label_all(list(reversed(recs)), P))
 
 
+class Rules2(unittest.TestCase):
+    def test_a_collection_is_not_one_chain(self):
+        a, b = rec("A.t", "Compfiles", many("x", 9)), rec("B.t", "Compfiles", many("y", 9))
+        self.assertEqual(label.label_pair(a, b, P)["rule"], "independent")  # Compfiles is a collection: compared by closures
+        c, d = rec("C.t", "Other", many("x", 9)), rec("D.t", "Other", many("y", 9))
+        self.assertEqual(label.label_pair(c, d, P)["rule"], "same-chain")  # an ordinary library is one chain
+        e, f = rec("E.t", "Compfiles", many("x", 9) + ["F.t"]), rec("F.t", "Compfiles", many("y", 9))
+        self.assertEqual(label.label_pair(e, f, P)["rule"], "same-chain")  # one uses the other: a chain whatever the library
+
+    def test_the_statement_closure_does_not_swallow_the_footprint(self):
+        big = {"statement_closure": many("x", 9), "statement_constants": ["x0"]}
+        a, b = rec("A.t", "L1", many("x", 9), **big), rec("B.t", "L2", many("x", 9), **big)
+        r = label.label_pair(a, b, P)
+        self.assertEqual(
+            (r["label"], r["rule"]), ("alias", "shared-proof")
+        )  # eight shared constants left, identical: a copy, not "substance"
+
+
 if __name__ == "__main__":
     unittest.main()

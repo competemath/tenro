@@ -6,9 +6,9 @@
 The closure of a declaration is every constant its proof term (or definition body) reaches, transitively. This is the input of the tawatur independence
 test (Tengoku's `scripts/tawatur.py`, docs/tawatur.md), and the footprint of tengai's alternate routes (ADR-0002). One line per requested name:
 
-  {"id": ..., "name": ..., "lib": ..., "closure": [...], "statement_closure": [...], "modules": {...}}
+  {"id": ..., "name": ..., "lib": ..., "closure": [...], "statement_closure": [...], "statement_constants": [...], "modules": {...}}
 
-`closure` is the transitive closure of the REDUCED value; `statement_closure` is the transitive closure of the constants of the type. `id`, `lib` and `modules` come from
+`closure` is the transitive closure of the REDUCED value; `statement_closure` is the transitive closure of the constants of the type; `statement_constants` is only the constants the type MENTIONS (the "constants of the statement itself" of docs/tawatur.md: what two proofs of one statement share by construction. The transitive closure can swallow the whole of a proof's footprint, and then nothing is left to compare). `id`, `lib` and `modules` come from
 `--meta` (tab separated: name, isnad id, library, module; the module may be empty). Without a row for a name, `id` is `stmt:<index of the type term>` (two theorems with
 one statement share it inside one export, because lean4export writes equal terms once), `lib` is `unknown` and `modules` is left out.
 
@@ -294,7 +294,8 @@ class Export:
         """the closure of one declaration, as the tawatur input line (without id, lib and modules)"""
         ty, _, _ = self.decl[n]
         proof = self.closure(set(self.direct(n)))
-        stmt = self.closure(set(self.terms_set(ty)))
+        direct_stmt = set(self.terms_set(ty))
+        stmt = self.closure(direct_stmt)
         if not include_self:
             proof.discard(n)
             stmt.discard(n)
@@ -302,6 +303,7 @@ class Export:
             "name": self.name(n),
             "closure": sorted(self.name(i) for i in proof),
             "statement_closure": sorted(self.name(i) for i in stmt),
+            "statement_constants": sorted(self.name(i) for i in direct_stmt - ({n} if not include_self else set())),
             "type_term": ty,
         }
 
@@ -348,7 +350,7 @@ def records(
         ident, lib, module = meta.get(name, (f"stmt:{r['type_term']}", "unknown", ""))
         del r["type_term"]
         r = {"id": ident, "lib": lib, **r}
-        mods = {c: modules[c] for c in (*r["closure"], *r["statement_closure"]) if modules and c in modules}
+        mods = {c: modules[c] for c in (*r["closure"], *r["statement_closure"], *r["statement_constants"]) if modules and c in modules}
         if module:
             mods[name] = module
         if mods:

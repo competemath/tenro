@@ -9,9 +9,9 @@ reproduced. This protocol regenerates the groups and labels them by rules a pers
 
 ## Rules, applied to every pair in a group, in this order (first match wins)
 
-1. **alias, same chain.** Same `lib`; or one theorem's closure contains the other's name (one proof uses the other); or both come from one translated upstream (same `from` source in the
+1. **alias, same chain.** Same `lib` (except a *collection* listed in `protocol.toml`, a library of separately written solutions such as Compfiles, whose members are not one chain); or one theorem's closure contains the other's name (one proof uses the other); or both come from one translated upstream (same `from` source in the
    isnad records).
-2. **substance.** A member with fewer than `substance_floor` constants outside the forced layer (Init, Std and Lean by defining module; the three axioms; the statement's own constants)
+2. **substance.** A member with fewer than `substance_floor` constants outside the forced layer (Init, Std and Lean by defining module; the three axioms; the constants the statement itself mentions, not their transitive closure, which can swallow a whole proof's footprint)
    cannot be called independent of anything: the pair is *similar*.
 3. **alias, shared proof.** Closure Jaccard (after the forced layer and the statement's constants) at least `alias_jaccard_min`.
 4. **independent.** Different `lib`, neither closure contains the other's name, Jaccard at most `independent_jaccard_max`.
