@@ -12,9 +12,11 @@ Content moves one way only. Nothing here is imported by Tengai; Tengoku receives
 
 ## What is here today
 
-The seed of this repository is the history of `competemath/tengai#1` (the drip, its gate and a three-module Lean abstraction
-seed built against a pinned Tengoku commit). Its code still says "Tengai" in places: the Lean namespace `Tengai` is the seed
-of the core and moves under `core/` at P2; the drip (`anomalous_archangel/`) is the hypothesis engine.
+- `core/` is Tengai at a tag (`core.lock`; `tools/mirror/mirror.py check` is the I6 test, a daily dry run applies hypothesis patches to Tengai's `main`).
+- `Tenro/` (with `anomalous_archangel/`, the drip and its gate) is the overlay: it imports Tengoku and itself, and is where the hypothesis engine writes.
+- `tools/` are the instruments of the plan (index below), each with tests and, where it needs Lean, a CI job on a fixture.
+- `eval/protocol.md` fixes the evaluation (paired design, exact McNemar, power analysis, margins) before any campaign.
+- The state of the five readiness gates is `tools/readiness/report.py` (the `readiness` workflow prints it): **no A/B against Mathlib until all five pass.**
 
 ## What it is for (target layout, from Tengai's `docs/design.md`)
 
@@ -25,7 +27,7 @@ of the core and moves under `core/` at P2; the drip (`anomalous_archangel/`) is 
 | `harvest/` | kernel-checked partial subgoals from **non-evaluation** intake runs only |
 | `hyp/<id>` | a hypothesis: a branch and a `manifest.json` (change, metric, expected effect, sample size) |
 | `eval/` | harness specs, identifier scramblers, the pre-registered protocol (runs and the held-out suite are not here) |
-| `tools/` | the instruments: dependency-closure extractor, performance profiler, divergence metric, lens checker |
+| `tools/` | the instruments, see [docs/tools.md](docs/tools.md) |
 
 A hypothesis is promoted to Tengai only on a net Pareto improvement, as a patch that applies cleanly to Tengai's `main`
 (a daily dry run checks that for every live hypothesis).
