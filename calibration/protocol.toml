@@ -1,0 +1,9 @@
+# Parameters of the rule-based labelling in PROTOCOL.md. Fixed here BEFORE any group is labelled; a change is a new file version and
+# every label is recomputed (labels are never edited by hand: only `human.jsonl` overrides, and each override names its reason).
+version = 1
+forced_layer_modules = ["Init", "Std", "Lean"]   # constants defined there are removed before any comparison (docs/tawatur.md, forced layer)
+substance_floor = 5                              # F: constants outside the forced layer and the statement's own; fewer = no independent proof
+alias_jaccard_min = 0.60                         # >= this closure similarity: alias
+independent_jaccard_max = 0.15                   # <= this (and every other independence condition): independent
+# the band between the two is "similar"; a pair within `borderline_margin` of either threshold is borderline and goes to a human
+borderline_margin = 0.05

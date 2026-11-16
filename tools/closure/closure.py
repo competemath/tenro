@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """closure.py - the dependency closure of declarations, computed from a lean4export file alone.
 
-  closure.py EXPORT.ndjson --names N1 N2 ... [--names-file FILE] [--meta META.tsv] [--include-self] > CLOSURES.jsonl
+  closure.py EXPORT.ndjson --names N1 N2 ... [--names-file FILE] [--meta META.tsv] [--modules MODS.tsv] [--include-self] > CLOSURES.jsonl
 
 The closure of a declaration is every constant its proof term (or definition body) reaches, transitively. This is the input of the tawatur independence
 test (Tengoku's `scripts/tawatur.py`, docs/tawatur.md), and the footprint of tengai's alternate routes (ADR-0002). One line per requested name:
@@ -320,7 +320,25 @@ def read_meta(path: Path | None) -> dict[str, tuple[str, str, str]]:
     return meta
 
 
-def records(ex: Export, names: list[str], meta: dict[str, tuple[str, str, str]], include_self: bool = False) -> list[dict]:
+def read_modules(path: Path | None) -> dict[str, str]:
+    """`name<TAB>module` lines: where each constant is defined (the tawatur forced layer judges Lean's core by module)."""
+    table: dict[str, str] = {}
+    if path is None:
+        return table
+    for ln in path.read_text(encoding="utf-8").splitlines():
+        name, _, mod = ln.partition("\t")
+        if name and mod:
+            table[name] = mod
+    return table
+
+
+def records(
+    ex: Export,
+    names: list[str],
+    meta: dict[str, tuple[str, str, str]],
+    include_self: bool = False,
+    modules: dict[str, str] | None = None,
+) -> list[dict]:
     index = ex.names_to_index()
     out = []
     for name in names:
@@ -330,8 +348,11 @@ def records(ex: Export, names: list[str], meta: dict[str, tuple[str, str, str]],
         ident, lib, module = meta.get(name, (f"stmt:{r['type_term']}", "unknown", ""))
         del r["type_term"]
         r = {"id": ident, "lib": lib, **r}
+        mods = {c: modules[c] for c in (*r["closure"], *r["statement_closure"]) if modules and c in modules}
         if module:
-            r["modules"] = {name: module}
+            mods[name] = module
+        if mods:
+            r["modules"] = mods
         out.append(r)
     return out
 
@@ -342,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--names", nargs="*", default=[])
     ap.add_argument("--names-file", type=Path, help="one declaration name a line")
     ap.add_argument("--meta", type=Path)
+    ap.add_argument(
+        "--modules", type=Path, help="name<TAB>module lines: the defining module of constants (Lean's core, for the forced layer)"
+    )
     ap.add_argument("--include-self", action="store_true")
     a = ap.parse_args(argv)
     names = list(a.names)
@@ -351,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("closure: no names given (--names or --names-file)")
     ex = Export()
     ex.read(a.export)
-    for r in records(ex, names, read_meta(a.meta), a.include_self):
+    for r in records(ex, names, read_meta(a.meta), a.include_self, read_modules(a.modules)):
         sys.stdout.write(json.dumps(r, ensure_ascii=False) + "\n")
     return 0
 
