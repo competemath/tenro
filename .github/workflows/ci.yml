@@ -33,6 +33,23 @@ jobs:
       - name: actionlint (workflow syntax and shellcheck)
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: { contents: read }
+    env:
+      BASE_REF: ${{ github.base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: Hypotheses are registered before they run, and a registered manifest only changes its status (I7)
+        run: |
+          if [ -n "$BASE_REF" ]; then python3 tools/registry/validate.py hyp --base-ref "origin/$BASE_REF"; else python3 tools/registry/validate.py hyp; fi
+      - name: The harvest comes from non-evaluation intake runs and from no held-out problem (I8)
+        run: python3 tools/registry/validate.py harvest
+
   dco:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -82,7 +99,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [python, dco, lean]
+    needs: [python, registry, dco, lean]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
