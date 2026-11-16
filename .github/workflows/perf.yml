@@ -1,9 +1,9 @@
 # The import-latency numbers of Tengai (core/), for the performance gate: cold `import Tengai` and the cost of one more module (tools/perf/perf_profile.py).
-# Measured on the GitHub-hosted ubuntu-latest image; the numbers travel with the run (artifact + step summary). Nothing is gated until perf-budget.toml exists.
+# Measured on the GitHub-hosted ubuntu-latest image; the numbers travel with the run (artifact + step summary), and perf-budget.toml gates them (tools/perf/check_budget.py).
 name: perf
 on:
   pull_request:
-    paths: ["tools/perf/**", ".github/workflows/perf.yml"]
+    paths: ["tools/perf/**", "perf-budget.toml", "core/**", ".github/workflows/perf.yml"]
   workflow_dispatch:
 permissions: {}
 concurrency:
@@ -19,7 +19,7 @@ jobs:
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { persist-credentials: false }
+        with: { fetch-depth: 0, persist-credentials: false }
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: "3.12" }
       - name: elan
@@ -35,6 +35,19 @@ jobs:
       - name: The cost of one more module (synthetic libraries of 0, 200 and 800 one-theorem modules)
         working-directory: core
         run: python3 ../tools/perf/perf_profile.py scale --sizes 0,200,800 --runs 7 | tee ../scale.json
+      - name: The measurement is within the caps
+        run: python3 tools/perf/check_budget.py check --budget perf-budget.toml --load load.json --scale scale.json
+      - name: No cap was raised (they are only lowered)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if git cat-file -e "$BASE_SHA:perf-budget.toml" 2>/dev/null; then
+            git show "$BASE_SHA:perf-budget.toml" > "$RUNNER_TEMP/base-budget.toml"
+            python3 tools/perf/check_budget.py ratchet --budget perf-budget.toml --base "$RUNNER_TEMP/base-budget.toml"
+          else
+            echo "no perf-budget.toml on the base yet: nothing to compare with"
+          fi
       - name: Summary
         run: |
           {
