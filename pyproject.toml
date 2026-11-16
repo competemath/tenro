@@ -8,7 +8,7 @@ license = { text = "Apache-2.0" }
 [tool.ruff]
 line-length = 140
 target-version = "py311"
-extend-exclude = [".lake", ".tengoku"]
+extend-exclude = [".lake", ".tengoku", "core"]  # core/ is Tengai, byte for byte (I6): it is linted in Tengai
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
