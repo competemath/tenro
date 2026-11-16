@@ -70,11 +70,23 @@ jobs:
           wc -l ../export.ndjson ../core-modules.tsv
       - name: Reduced closures
         run: python3 tools/closure/closure.py export.ndjson --names-file names.txt --meta meta.tsv --modules core-modules.tsv > closures.jsonl
+      - name: Waypoints (the ids of the statements of each proof's haves), when the pinned Tengoku can say them
+        run: |
+          if (cd .tengoku && lake env .lake/build/bin/tengoku-isnad --haves --import Init --module Init.Prelude >/dev/null 2>&1); then
+            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --extra-arg --haves --prefix isnad1-have)
+            complete=""; [ -s haves-failed.txt ] || complete="--assume-complete"
+            python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py .tengoku/scripts/isnad.py $complete > closures-wp.jsonl
+            mv closures-wp.jsonl closures.jsonl
+          else
+            echo "::notice::the pinned Tengoku has no tengoku-isnad --haves (bump tengoku.pin past the waypoints PR): the pairs carry no second axis"
+          fi
       - name: Tengoku's independence report on them (reference, parameters of docs/tawatur.md)
         run: python3 .tengoku/scripts/tawatur.py report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
       - name: Label by the written protocol and summarise
         run: |
           python3 tools/calibration/label.py --input closures.jsonl > labels.jsonl
+          python3 tools/calibration/thresholds.py labels.jsonl > thresholds.json
+          cat thresholds.json
           python3 tools/calibration/summary.py labels.jsonl --stats groups-stats.json --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -88,5 +100,6 @@ jobs:
             tawatur-report.jsonl
             labels.jsonl
             summary.md
+            thresholds.json
             isnad-failed.txt
           retention-days: 30

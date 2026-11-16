@@ -27,10 +27,10 @@ def valid(module: str) -> bool:
     return NAME.fullmatch(module) is not None
 
 
-def run_exe(modules: list[str], exe: str) -> tuple[int, list[str], str]:
-    cmd = ["lake", "env", exe, *[x for m in modules for x in ("--module", m)]]
+def run_exe(modules: list[str], exe: str, extra: tuple[str, ...] = (), prefix: str = "isnad1") -> tuple[int, list[str], str]:
+    cmd = ["lake", "env", exe, *extra, *[x for m in modules for x in ("--module", m)]]
     r = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    return r.returncode, [ln for ln in r.stdout.splitlines() if ln.startswith("isnad1\t")], (r.stderr or r.stdout).strip()[-300:]
+    return r.returncode, [ln for ln in r.stdout.splitlines() if ln.startswith(prefix + "\t")], (r.stderr or r.stdout).strip()[-300:]
 
 
 def batch_records(part: list[str], run: Runner) -> tuple[list[str], list[tuple[str, str]]]:
@@ -71,9 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--jobs", type=int, default=2)
     ap.add_argument("--exe", default=".lake/build/bin/tengoku-isnad")
     ap.add_argument("--max-failed-share", type=float, default=0.05)
+    ap.add_argument("--extra-arg", action="append", default=[], help="an option for tengoku-isnad (e.g. --haves)")
+    ap.add_argument("--prefix", default="isnad1", help="the record prefix to keep (e.g. isnad1-have)")
     a = ap.parse_args(argv)
     modules = [ln.strip() for ln in a.modules.read_text(encoding="utf-8").splitlines() if ln.strip()]
-    records, failed = run_all(modules, lambda part: run_exe(part, a.exe), a.batch, a.jobs)
+    records, failed = run_all(modules, lambda part: run_exe(part, a.exe, tuple(a.extra_arg), a.prefix), a.batch, a.jobs)
     a.out.write_text("".join(r + "\n" for r in records), encoding="utf-8")
     a.failed.write_text("".join(f"{m}\t{why.replace(chr(10), ' ')}\n" for m, why in failed), encoding="utf-8")
     print(f"run_isnad: {len(modules)} modules, {len(records)} records, {len(failed)} modules failed")
