@@ -33,7 +33,7 @@ jobs:
       - name: Exactly the hypotheses the proofs never use
         run: |
           cut -f2,4 "$RUNNER_TEMP/probe.out" | sort > "$RUNNER_TEMP/got.txt"
-          printf 'Pr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
+          printf 'Pr.cx_bool_int\t2\nPr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
           diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
           python3 tools/soundness/probe_findings.py hypothesis-dropping < "$RUNNER_TEMP/probe.out" | head -12
       - name: The counterexample probe rejects a generalisation that is false and lets a true one through
