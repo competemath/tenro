@@ -13,11 +13,13 @@ The library of a module is the component after `Tengoku.` (the top-level directo
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from tengoku_isnad import load_module  # noqa: E402
 
 TAG = re.compile(r"@isnad1 id=(\S+)")
 
@@ -59,11 +61,7 @@ def meta_rows(lines, dup_ids: set[str], record_cls) -> list[tuple[str, str, str,
 
 
 def _load_record(isnad_py: Path):
-    spec = importlib.util.spec_from_file_location("tengoku_isnad_py", isnad_py)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod.Record
+    return load_module(isnad_py).Record
 
 
 def main(argv: list[str] | None = None) -> int:
