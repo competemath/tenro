@@ -1,0 +1,49 @@
+# The scrambler on a real compile: a small fixture library (namespaces, dot notation, open, an instance, a `where` lemma) and its problem file are built, scrambled by a key made on the
+# runner, and the scrambled copy must build too, with no original identifier left. Nothing here proves a hypothesis; it decides whether the scrambler may be used as a gate.
+name: scramble
+on:
+  pull_request:
+    paths: ["tools/scramble/**", ".github/workflows/scramble.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: scramble-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: The fixture builds as it is
+        working-directory: tools/scramble/fixture
+        run: lake build 2>&1 | tail -40
+      - name: The names Lean knows (library, core, parser tokens)
+        working-directory: tools/scramble/fixture
+        run: |
+          lake env lean --run ../ScrambleNames.lean Fx > "$RUNNER_TEMP/names.tsv"
+          cut -f1 "$RUNNER_TEMP/names.tsv" | sort | uniq -c
+      - name: Scramble a copy under a key made here, and build it
+        run: |
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$RUNNER_TEMP/key"
+          python3 tools/scramble/scramble.py map --names "$RUNNER_TEMP/names.tsv" --key-file "$RUNNER_TEMP/key" > "$RUNNER_TEMP/map.json"
+          python3 tools/scramble/scramble.py copy tools/scramble/fixture "$RUNNER_TEMP/scrambled" --map "$RUNNER_TEMP/map.json"
+          (cd "$RUNNER_TEMP/scrambled" && lake build 2>&1 | tail -40)
+      - name: No original identifier is left, and the file count is the same
+        run: |
+          for w in Fx Lib Challenge Pt double double_eq double_add add_x with_where problem_double_swap; do  # `swap`, `swap_swap`, `aux`, `x`, `y` are words the core owns too (Prod.swap...): kept by design
+            if grep -rqw --include='*.lean' --include='lakefile.toml' --exclude-dir=.lake -e "$w" "$RUNNER_TEMP/scrambled"; then echo "::error::$w is still there"; exit 1; fi
+          done
+          test "$(find "$RUNNER_TEMP/scrambled" -name '*.lean' -not -path '*/.lake/*' | wc -l)" = "$(find tools/scramble/fixture -name '*.lean' -not -path '*/.lake/*' | wc -l)"
+          cat "$RUNNER_TEMP"/scrambled/*.lean | head -20
