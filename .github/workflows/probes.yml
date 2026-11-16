@@ -1,0 +1,38 @@
+# The soundness probes on a real compile (tools/soundness/Probes.lean): the hypothesis-dropping probe must report exactly the hypotheses the fixture's proofs never use.
+name: probes
+on:
+  pull_request:
+    paths: ["tools/soundness/**", ".github/workflows/probes.yml"]
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: probes-${{ github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+jobs:
+  fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Build the fixture and run the probe
+        working-directory: tools/soundness/fixture
+        run: |
+          lake build 2>&1 | tail -3
+          lake env lean --run ../Probes.lean unused-hyps Pr.Cases | tee "$RUNNER_TEMP/probe.out"
+      - name: Exactly the hypotheses the proofs never use
+        run: |
+          cut -f2,4 "$RUNNER_TEMP/probe.out" | sort > "$RUNNER_TEMP/got.txt"
+          printf 'Pr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
+          diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
+          python3 tools/soundness/probe_findings.py hypothesis-dropping < "$RUNNER_TEMP/probe.out" | head -12

@@ -1,0 +1,8 @@
+name = "Pr"
+defaultTargets = ["Pr"]
+
+[leanOptions]
+warningAsError = false
+
+[[lean_lib]]
+name = "Pr"
