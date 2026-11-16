@@ -24,4 +24,10 @@ theorem none_here (n : Nat) : n = n := rfl
 /-- a Prop-valued instance argument that is unused -/
 theorem unused_inst (p : Prop) [Decidable p] (n : Nat) : n = n := rfl
 
+/-- the hypothesis is needed: without it the statement is false at a = 0 -/
+theorem cx_needs_hyp (a : Nat) (h : 0 < a) : a ≠ 0 := by omega
+
+/-- over Bool and Int as well; dropping `h` gives a statement that is still true -/
+theorem cx_bool_int (b : Bool) (n : Int) (h : n = n) : (b && true) = b := by simp
+
 end Pr

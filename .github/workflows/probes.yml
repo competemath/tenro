@@ -36,3 +36,20 @@ jobs:
           printf 'Pr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
           diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
           python3 tools/soundness/probe_findings.py hypothesis-dropping < "$RUNNER_TEMP/probe.out" | head -12
+      - name: The counterexample probe rejects a generalisation that is false and lets a true one through
+        working-directory: tools/soundness/fixture
+        run: |
+          run() { lake env lean --run ../Probes.lean counterexample Pr.Cases "$@"; }
+          {
+            run Pr.cx_needs_hyp 1
+            run Pr.cx_needs_hyp
+            run Pr.used_hyps 2,3
+            run Pr.used_hyps 3
+            run Pr.unused_hyp 2
+            run Pr.cx_bool_int 2
+            run Pr.one_of_two 3
+            run Pr.dependent 1
+          } > "$RUNNER_TEMP/cx.out"
+          cat "$RUNNER_TEMP/cx.out"
+          printf 'counterexample\tPr.cx_needs_hyp\t1\ta=0\nnone\tPr.cx_needs_hyp\t\ncounterexample\tPr.used_hyps\t2,3\ta=0, b=0\ncounterexample\tPr.used_hyps\t3\ta=0, b=2\nnone\tPr.unused_hyp\t2\nnone\tPr.cx_bool_int\t2\ncounterexample\tPr.one_of_two\t3\ta=0, b=1\nnone\tPr.dependent\t1\n' > "$RUNNER_TEMP/cx.want"
+          diff "$RUNNER_TEMP/cx.want" "$RUNNER_TEMP/cx.out"
