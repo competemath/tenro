@@ -1,7 +1,7 @@
 /-
 The names the scrambler needs from Lean, one `kind<TAB>name` line each (run from the Lake project that holds the library, `lake env lean --run`):
 
-  lib       a declaration of the modules whose top-level name is the first argument (the library and the problem are scrambled)
+  lib       a declaration, or a module, whose top-level name is the first argument (the library and the problem are scrambled)
   core      a declaration of Init, Std or Lean (never scrambled)
   reserved  an identifier-like token of Lean's parser (keywords, tactic and command names: never scrambled)
 
@@ -14,6 +14,9 @@ def main (args : List String) : IO Unit := do
   initSearchPath (← findSysroot)
   let top := args.headD "Fx"
   let env ← importModules #[{ module := top.toName }, { module := `Init }, { module := `Std }, { module := `Lean }] {}
+  -- the module names too: `import Fx.Lib` and the file paths spell them
+  for m in env.header.moduleNames do
+    if m.getRoot.toString == top then IO.println s!"lib\t{m}"
   for (n, _) in env.constants.map₁.toList do
     let some i := env.getModuleIdxFor? n | continue
     let root := (env.header.moduleNames[i.toNat]!).getRoot.toString
