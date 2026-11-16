@@ -1,0 +1,8 @@
+name = "Fx"
+defaultTargets = ["Fx"]
+
+[leanOptions]
+warningAsError = true
+
+[[lean_lib]]
+name = "Fx"

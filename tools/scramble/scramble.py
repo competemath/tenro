@@ -2,6 +2,8 @@
 """scramble.py - identifier scrambling for the name-obfuscation test (eval/protocol.md, design fix 2). Standard library only.
 
   scramble.py map     --library NAMES --problem NAMES --core NAMES --reserved TOKENS --key-file KEY > map.json
+  scramble.py map     --names NAMES.tsv --key-file KEY > map.json          (NAMES.tsv from tools/scramble/ScrambleNames.lean: kind<TAB>name)
+  scramble.py copy    SRC_PROJECT DST_PROJECT --map map.json                (the scrambled copy of a Lake project, files moved to their scrambled paths)
   scramble.py rewrite --map map.json FILE.lean...  (rewrites in place: the files of the scrambled copy, never the originals)
 
 What is scrambled. BOTH the library's identifiers and the problem's, so that a prover can use neither a memorised library lemma name nor a memorised problem name. The unit is the COMPONENT of a name
@@ -107,12 +109,60 @@ def rewrite(text: str, mapping: dict[str, str]) -> str:
     return "".join(out)
 
 
+def read_names(path: str) -> tuple[list[str], list[str], set[str]]:
+    """`kind<TAB>name` lines (tools/scramble/ScrambleNames.lean): (library names, core names, reserved tokens)"""
+    lib, core, reserved = [], [], set()
+    for ln in Path(path).read_text(encoding="utf-8").splitlines():
+        kind, _, name = ln.partition("\t")
+        if kind == "lib":
+            lib.append(name)
+        elif kind == "core":
+            core.append(name)
+        elif kind == "reserved":
+            reserved.add(name)
+    return lib, core, reserved
+
+
+QUOTED = re.compile(r'"([^"\\]*)"')
+
+
+def copy_tree(src: Path, dst: Path, mapping: dict[str, str]) -> int:
+    """The scrambled copy of a Lake project: every .lean file rewritten and moved to the path its components map to, and the quoted names of lakefile.toml mapped. Returns the number of files."""
+    n = 0
+    for f in sorted(src.rglob("*")):
+        if not f.is_file() or ".lake" in f.parts:
+            continue
+        rel = f.relative_to(src)
+        if f.suffix == ".lean":
+            parts = [mapping.get(p, p) for p in rel.with_suffix("").parts]
+            target = dst.joinpath(*parts).with_suffix(".lean")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(rewrite(f.read_text(encoding="utf-8"), mapping), encoding="utf-8")
+            n += 1
+        elif f.name in ("lakefile.toml", "lean-toolchain"):
+            target = dst / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            text = f.read_text(encoding="utf-8")
+            if f.name == "lakefile.toml":
+                text = QUOTED.sub(lambda m: f'"{mapping.get(m.group(1), m.group(1))}"', text)
+            target.write_text(text, encoding="utf-8")
+    return n
+
+
 def read_lines(path: str) -> list[str]:
     return [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "map" and "--names" in argv:
+        opts = dict(zip(argv[1::2], argv[2::2], strict=False))
+        lib, core, reserved = read_names(opts["--names"])
+        print(json.dumps(build_map(lib, [], core, reserved, Path(opts["--key-file"]).read_bytes().strip()), indent=0, sort_keys=True))
+        return 0
+    if len(argv) == 5 and argv[0] == "copy" and argv[3] == "--map":
+        print(copy_tree(Path(argv[1]), Path(argv[2]), json.loads(Path(argv[4]).read_text(encoding="utf-8"))))
+        return 0
     if argv and argv[0] == "map":
         opts = dict(zip(argv[1::2], argv[2::2], strict=False))
         mapping = build_map(
