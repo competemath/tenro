@@ -298,6 +298,12 @@ class Statement(unittest.TestCase):
         r = cl.records(load(b), ["thm1"], {"thm1": ("eq.1h0v.s3.abc", "lib-a", "Lib.Mod")})[0]
         self.assertEqual((r["id"], r["lib"], r["modules"]), ("eq.1h0v.s3.abc", "lib-a", {"thm1": "Lib.Mod"}))
 
+    def test_modules_table_fills_the_closure_constants_it_knows(self):
+        b = base()
+        b.decl("thm", "thm1", b.const("T"), b.const("P"))
+        r = cl.records(load(b), ["thm1"], {"thm1": ("i", "l", "Lib.Mod")}, modules={"T": "Init.Prelude", "Other": "Std.X"})[0]
+        self.assertEqual(r["modules"], {"T": "Init.Prelude", "thm1": "Lib.Mod"})
+
 
 class Format(unittest.TestCase):
     def test_a_newer_major_version_is_refused(self):

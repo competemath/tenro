@@ -70,12 +70,23 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("scan").add_argument("root")
+    for name in ("counts", "modules", "tags"):  # read dup.json on stdin: a one-line summary, the module list, the number of tags read
+        sub.add_parser(name)
     m = sub.add_parser("meta")
     m.add_argument("--dup", required=True)
     m.add_argument("--isnad-py", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "scan":
         print(json.dumps(scan(Path(a.root)), sort_keys=True, indent=1))
+        return 0
+    if a.cmd in ("counts", "modules", "tags"):
+        d = json.load(sys.stdin)
+        if a.cmd == "counts":
+            print(f"tags {d['tags_read']}, ids {d['distinct_ids']}, duplicate ids {len(d['dup'])}, modules {len(d['modules'])}")
+        elif a.cmd == "modules":
+            print("\n".join(d["modules"]))
+        else:
+            print(d["tags_read"])
         return 0
     dup_ids = set(json.loads(Path(a.dup).read_text())["dup"])
     for row in meta_rows(sys.stdin, dup_ids, _load_record(Path(a.isnad_py))):

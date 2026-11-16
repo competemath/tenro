@@ -1,0 +1,92 @@
+# Regenerates the labelled statement groups the tawatur divergence metric is calibrated on (calibration/PROTOCOL.md). Manual: it reads the whole tree.
+# Stages: tags in the sources -> duplicate ids -> `tengoku-isnad` on their modules (recomputed ids, full names) -> one targeted lean4export -> closure.py
+# -> Tengoku's scripts/tawatur.py -> label.py -> summary. Nothing here proves anything: it measures the tree.
+name: calibration
+on:
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: calibration
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+  TENGOKU_VERIFY: require
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  groups:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions: { contents: read }
+    steps:
+      - name: Free disk (Tengoku's compiled cache is several GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm /usr/share/miniconda /usr/local/share/powershell /usr/local/lib/node_modules /opt/az /usr/local/graalvm /usr/local/share/chromium
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Tengoku at the pin, with its compiled cache
+        run: scripts/tengoku-setup.sh
+      - name: Tags in the sources, the ids that occur twice
+        run: |
+          python3 tools/calibration/groups.py scan .tengoku > dup.json
+          python3 tools/calibration/groups.py counts < dup.json
+      - name: Recompute the ids of those modules (tengoku-isnad)
+        run: |
+          cd .tengoku
+          lake build tengoku-isnad 2>&1 | tail -3
+          python3 ../tools/calibration/groups.py modules < ../dup.json > ../modules.txt
+          mapfile -t mods < ../modules.txt
+          : > ../isnad.tsv
+          for ((i = 0; i < ${#mods[@]}; i += 25)); do
+            args=()
+            for m in "${mods[@]:i:25}"; do args+=(--module "$m"); done
+            lake env .lake/build/bin/tengoku-isnad "${args[@]}" | { grep '^isnad1' || true; } >> ../isnad.tsv
+          done
+          wc -l ../isnad.tsv
+      - name: The group table and the names to export
+        run: |
+          python3 tools/calibration/groups.py meta --dup dup.json --isnad-py .tengoku/scripts/isnad.py < isnad.tsv > meta.tsv
+          cut -f1 meta.tsv > names.txt
+          cut -f4 meta.tsv | sort -u > export-modules.txt
+          wc -l meta.tsv names.txt export-modules.txt
+      - name: lean4export at the pinned commit
+        run: |
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
+          git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
+          cd "$RUNNER_TEMP/lean4export" && lake build 2>&1 | tail -3
+      - name: One targeted export of exactly those declarations, and where Lean's core is defined
+        run: |
+          mapfile -t mods < export-modules.txt
+          mapfile -t names < names.txt
+          cd .tengoku
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > ../export.ndjson
+          lake env lean --run ../tools/calibration/CoreModules.lean > ../core-modules.tsv
+          wc -l ../export.ndjson ../core-modules.tsv
+      - name: Reduced closures
+        run: python3 tools/closure/closure.py export.ndjson --names-file names.txt --meta meta.tsv --modules core-modules.tsv > closures.jsonl
+      - name: Tengoku's independence report on them (reference, parameters of docs/tawatur.md)
+        run: python3 .tengoku/scripts/tawatur.py report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
+      - name: Label by the written protocol and summarise
+        run: |
+          python3 tools/calibration/label.py --input closures.jsonl > labels.jsonl
+          python3 tools/calibration/summary.py labels.jsonl --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: calibration
+          path: |
+            dup.json
+            meta.tsv
+            closures.jsonl
+            tawatur-report.jsonl
+            labels.jsonl
+            summary.md
+          retention-days: 30
