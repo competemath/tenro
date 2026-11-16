@@ -86,8 +86,7 @@ def scale(sizes: list[int], runs: int, workdir: Path, toolchain: str) -> dict:
     for lib, n in zip(libs, sizes, strict=True):
         write_library(workdir, lib, n)
     (workdir / "lakefile.toml").write_text(
-        'name = "perfsyn"\n'
-        + "".join(f'[[lean_lib]]\nname = "{lib}"\nglobs = ["{lib}", "{lib}.+"]\n' for lib in libs)
+        'name = "perfsyn"\n' + "".join(f'[[lean_lib]]\nname = "{lib}"\nglobs = ["{lib}", "{lib}.+"]\n' for lib in libs),
         encoding="utf-8",
     )
     wall(["lake", "build"], workdir)
