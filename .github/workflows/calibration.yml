@@ -39,19 +39,13 @@ jobs:
         run: |
           python3 tools/calibration/groups.py scan .tengoku > dup.json
           python3 tools/calibration/groups.py counts < dup.json
-      - name: Recompute the ids of those modules (tengoku-isnad)
+      - name: Recompute the ids of those modules (tengoku-isnad; a module that does not import is listed, not fatal)
         run: |
           cd .tengoku
           lake build tengoku-isnad 2>&1 | tail -3
           python3 ../tools/calibration/groups.py modules < ../dup.json > ../modules.txt
-          mapfile -t mods < ../modules.txt
-          : > ../isnad.tsv
-          for ((i = 0; i < ${#mods[@]}; i += 25)); do
-            args=()
-            for m in "${mods[@]:i:25}"; do args+=(--module "$m"); done
-            lake env .lake/build/bin/tengoku-isnad "${args[@]}" | { grep '^isnad1' || true; } >> ../isnad.tsv
-          done
-          wc -l ../isnad.tsv
+          python3 ../tools/calibration/run_isnad.py --modules ../modules.txt --out ../isnad.tsv --failed ../isnad-failed.txt --jobs 2
+          wc -l ../isnad.tsv ../isnad-failed.txt
       - name: The group table and the names to export
         run: |
           python3 tools/calibration/groups.py meta --dup dup.json --isnad-py .tengoku/scripts/isnad.py < isnad.tsv > meta.tsv
@@ -89,4 +83,5 @@ jobs:
             tawatur-report.jsonl
             labels.jsonl
             summary.md
+            isnad-failed.txt
           retention-days: 30
