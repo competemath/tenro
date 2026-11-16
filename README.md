@@ -1,50 +1,36 @@
-# Tengai
+# Tenro
 
-The volatile upstream of [Tengoku](https://github.com/competemath/tengoku).
+The furnace. Where [Tengai](https://github.com/competemath/tengai)'s clean core is mixed with
+[Tengoku](https://github.com/competemath/tengoku)'s audited intake and with verified partial subgoals harvested from prover
+runs, and where hypotheses for improving Tengai are formed, built and benchmarked without touching Tengai's history or CI.
 
-| | Tengoku | Tengai |
-|---|---|---|
-| What it is | the store: one self-contained tree of verified Lean 4 | the workshop: mathematics made, restructured and thrown away quickly |
-| How it changes | slowly, append-only, through a gate and a merge queue | violently and rapidly, by anomalous-archangel and by pull request |
-| Names | permanent | free to move |
-| Depends on | nothing | Tengoku, at the commit in `tengoku.pin` |
-
-Everything in `Tengai/` compiles against Tengoku (`import Tengoku.All`) with every warning an error, no `sorry`, and only the three classical
-axioms.
-
-## The seed
-
-A small, finished piece of abstraction, to have something real for the first drip to read:
-
-- `Tengai.Seed.Gauss`: twice the sum of `0 … n-1` is `n (n-1)`, in any commutative ring (Tengoku has it for the naturals, with truncated subtraction).
-- `Tengai.Seed.OddSum`: the sum of the first `n` odd numbers is `n²`, in any commutative ring.
-- `Tengai.Bridge.GaussOdd`: the second is the first, twice, plus `n`.
-
-## anomalous-archangel
-
-On every drip it reads the whole tree like a mathematician: understands and maps it, pictures it, tries to abstract it (3-d to n-d, discrete to
-real, finite to infinite, commutative to general), weighs what a result does to other mathematics, and bridges pieces that look unrelated. It
-has angels under it, with a spawn limit of depth 2, breadth 3 and a budget that is conserved down the tree. It is sovereign: it may rewrite
-anything, but only Lean that passed the gate lands, and every other claim carries a label (`note`, `observation`, `conjecture`).
-See [docs/anomalous-archangel.md](docs/anomalous-archangel.md). Its findings are in `drips/`; the proof requests it wants leak-archangel to take
-are in `drips/requests.json`. The dashboard at competemath.com/tengai shows both.
-
-How content moves between leak-archangel, Tengai and Tengoku: [docs/flows.md](docs/flows.md).
-
-## Running it
-
-```bash
-scripts/tengoku-setup.sh                  # Tengoku at the pin, with its compiled cache (several GB), in .tengoku
-python -m anomalous_archangel gate        # lint, Lake with warnings as errors, the axiom audit
-python -m anomalous_archangel drip --dry-run
-python -m pytest -q
+```
+tengoku (frozen source)  ->  tenro (this repository)  ->  tengai (clean core)
 ```
 
-In CI (`.github/workflows`): `ci` on every pull request (lint, tests, sign-off, the Lean build); `drip` daily and on demand
-(`gh workflow run drip.yml -R competemath/tengai -f budget_usd=8`; `-f dry_run=true` spends nothing). The drip needs the repository secret
-`CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, then `gh secret set CLAUDE_CODE_OAUTH_TOKEN -R competemath/tengai`); without it the run says
-so and ends green.
+Content moves one way only. Nothing here is imported by Tengai; Tengoku receives nothing from here.
 
-Commits are signed off (`git commit -s`). Python is linted by ruff 0.12.2 (line length 140), workflows pin every action to a commit.
+## What is here today
 
-Licence: Apache-2.0.
+The seed of this repository is the history of `competemath/tengai#1` (the drip, its gate and a three-module Lean abstraction
+seed built against a pinned Tengoku commit). Its code still says "Tengai" in places: the Lean namespace `Tengai` is the seed
+of the core and moves under `core/` at P2; the drip (`anomalous_archangel/`) is the hypothesis engine.
+
+## What it is for (target layout, from Tengai's `docs/design.md`)
+
+| Path | Content |
+|---|---|
+| `core/` | byte-identical to a Tengai tag (tree-hash checked, identical `lean-toolchain`), or that tag plus named, registered hypothesis patches |
+| `intake/` | Tengoku, pinned by commit; its compiled cache is used, nothing is copied |
+| `harvest/` | kernel-checked partial subgoals from **non-evaluation** intake runs only |
+| `hyp/<id>` | a hypothesis: a branch and a `manifest.json` (change, metric, expected effect, sample size) |
+| `eval/` | harness specs, identifier scramblers, the pre-registered protocol (runs and the held-out suite are not here) |
+| `tools/` | the instruments: dependency-closure extractor, performance profiler, divergence metric, lens checker |
+
+A hypothesis is promoted to Tengai only on a net Pareto improvement, as a patch that applies cleanly to Tengai's `main`
+(a daily dry run checks that for every live hypothesis).
+
+The design is in [Tengai's `docs/design.md`](https://github.com/competemath/tengai/blob/docs/architecture/docs/design.md)
+and its [decisions](https://github.com/competemath/tengai/tree/docs/architecture/docs/adr).
+
+Licence: Apache-2.0 (see `LICENSE`).
