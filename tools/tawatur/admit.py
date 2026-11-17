@@ -117,16 +117,40 @@ def calibrate(pairs: list[tuple[float, float, str]], step: float = 0.01) -> dict
     }
 
 
+THRESHOLDS_FILE = Path(__file__).resolve().parents[2] / "calibration" / "thresholds.json"
+
+
+def calibrated_thresholds(path: Path = THRESHOLDS_FILE) -> tuple[float, float]:
+    """(a, b) of the stored calibration result (calibration/thresholds.json). A result that is not feasible (some labelled pair is on the wrong side) is not a calibration and is refused."""
+    th = json.loads(path.read_text(encoding="utf-8"))["thresholds"]
+    if not th.get("feasible"):
+        raise ValueError(
+            f"{path}: the stored calibration is not feasible ({th.get('violations')} labelled pairs on the wrong side): no defaults"
+        )
+    a, b = float(th["a"]), float(th["b"])
+    lo_a, hi_a = th["region"]["a"]
+    lo_b, hi_b = th["region"]["b"]
+    if not (lo_a <= a <= hi_a and lo_b <= b <= hi_b):
+        raise ValueError(f"{path}: (a, b) = ({a}, {b}) is outside the region the same result reports")
+    return a, b
+
+
 def main(argv: list[str] | None = None) -> int:
-    """admit.py calibrate PAIRS.jsonl   (lines {"df", "dw", "label"})   |   admit.py status FOLDER.json --a A --b B   (a JSON list of routes)"""
+    """admit.py calibrate PAIRS.jsonl   (lines {"df", "dw", "label"})
+    admit.py status FOLDER.json [--a A] [--b B]   (a JSON list of routes; a and b default to the stored calibration, calibration/thresholds.json)"""
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) >= 2 and argv[0] == "calibrate":
         rows = read_jsonl(argv[1])
         print(json.dumps(calibrate([(r["df"], r["dw"], r["label"]) for r in rows]), indent=1))
         return 0
-    if len(argv) >= 6 and argv[0] == "status" and argv[2] == "--a" and argv[4] == "--b":
+    if len(argv) >= 2 and argv[0] == "status":
+        opts = dict(zip(argv[2::2], argv[3::2], strict=False))
+        if len(argv) % 2 != 0 or not set(opts) <= {"--a", "--b"}:
+            print(main.__doc__)
+            return 2
+        da, db = calibrated_thresholds()
         routes = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-        print(json.dumps(status(routes, float(argv[3]), float(argv[5])), indent=1))
+        print(json.dumps(status(routes, float(opts.get("--a", da)), float(opts.get("--b", db))), indent=1))
         return 0
     print(main.__doc__)
     return 2
