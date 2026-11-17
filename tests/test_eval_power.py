@@ -42,6 +42,30 @@ class Power(unittest.TestCase):
     def test_the_protocol_prints_the_table_this_file_computes(self):
         self.assertIn(power.table(), (ROOT / "eval" / "protocol.md").read_text(encoding="utf-8"))
 
+    def test_the_protocol_prints_the_resolvable_table(self):
+        self.assertIn(power.resolvable_table(), (ROOT / "eval" / "protocol.md").read_text(encoding="utf-8"))
+
+    def test_resolvable_is_the_inverse_of_the_sample_size(self):
+        for psi in power.PSIS:
+            for n in power.SIZES:
+                g = power.min_gain(n, psi)
+                if g is not None:
+                    self.assertLessEqual(power.n_superiority(g, psi), n, (n, psi))
+                    # a gain one step (0.001) finer is NOT detectable
+                    if g - 0.001 > 0:
+                        self.assertGreater(power.n_superiority(g - 0.001, psi), n, (n, psi))
+                m = power.min_margin(n, psi)
+                self.assertLessEqual(power.n_noninferiority(m, psi), n)
+                if m - 0.001 > 0:
+                    self.assertGreater(power.n_noninferiority(m - 0.001, psi), n)
+
+    def test_more_problems_resolve_finer_effects(self):
+        for psi in power.PSIS:
+            gains = [power.min_gain(n, psi) for n in power.SIZES]
+            margins = [power.min_margin(n, psi) for n in power.SIZES]
+            self.assertEqual(gains, sorted(gains, reverse=True))
+            self.assertEqual(margins, sorted(margins, reverse=True))
+
     def test_the_cli(self):
         out = subprocess.run(
             [sys.executable, str(ROOT / "eval" / "power.py"), "n", "--delta", "0.03", "--psi", "0.2"],
