@@ -89,6 +89,13 @@ def select_groups(
     return out, stats
 
 
+def shard_rows(rows: list[tuple[str, str, str, str]], of: int, index: int) -> list[tuple[str, str, str, str]]:
+    """the rows of shard `index` of `of`: a group (one id) is never split, and a rerun cuts the same way (by the hash of the id). rows: (name, id, lib, module)."""
+    if not 0 <= index < of:
+        raise ValueError("need 0 <= index < of")
+    return [r for r in rows if int(hashlib.sha256(r[1].encode()).hexdigest()[:8], 16) % of == index]
+
+
 def _load_record(isnad_py: Path):
     return load_module(isnad_py).Record
 
@@ -100,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
     sel = sub.add_parser("select")
     sel.add_argument("--max-groups", type=int, default=150)
     sel.add_argument("--stats", type=Path, required=True)
+    sh = sub.add_parser("shard")
+    sh.add_argument("--of", type=int, required=True)
+    sh.add_argument("--index", type=int, required=True)
     for name in ("counts", "modules", "tags"):  # read dup.json on stdin: a one-line summary, the module list, the number of tags read
         sub.add_parser(name)
     m = sub.add_parser("meta")
@@ -114,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
         chosen, stats = select_groups(rows, a.max_groups)
         a.stats.write_text(json.dumps(stats, sort_keys=True, indent=1) + "\n", encoding="utf-8")
         for r in chosen:
+            print("\t".join(r))
+        return 0
+    if a.cmd == "shard":
+        rows = [tuple(ln.rstrip("\n").split("\t")[:4]) for ln in sys.stdin if ln.strip()]
+        for r in shard_rows(rows, a.of, a.index):
             print("\t".join(r))
         return 0
     if a.cmd in ("counts", "modules", "tags"):

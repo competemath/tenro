@@ -69,5 +69,25 @@ class Select(unittest.TestCase):
             self.assertEqual(libs, {"libA", "libB", "libC", "libD"})  # the four libraries, not two theorems of libA
 
 
+class Shards(unittest.TestCase):
+    ROWS = [(f"T.n{i}", f"id{i % 17}", f"L{i % 3}", f"M{i % 5}") for i in range(200)]
+
+    def test_the_shards_partition_the_rows_and_keep_a_group_whole(self):
+        parts = [groups.shard_rows(self.ROWS, 4, k) for k in range(4)]
+        self.assertEqual(sorted(r for p in parts for r in p), sorted(self.ROWS))
+        homes = {}
+        for k, p in enumerate(parts):
+            for r in p:
+                homes.setdefault(r[1], set()).add(k)
+        self.assertTrue(all(len(v) == 1 for v in homes.values()), "an id sits in two shards")
+
+    def test_it_is_deterministic_and_a_bad_index_is_an_error(self):
+        self.assertEqual(groups.shard_rows(self.ROWS, 3, 1), groups.shard_rows(list(self.ROWS), 3, 1))
+        with self.assertRaises(ValueError):
+            groups.shard_rows(self.ROWS, 3, 3)
+        with self.assertRaises(ValueError):
+            groups.shard_rows(self.ROWS, 3, -1)
+
+
 if __name__ == "__main__":
     unittest.main()
