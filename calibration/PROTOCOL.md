@@ -30,3 +30,8 @@ A person sees only (a) borderline pairs and (b) every group labelled *independen
 
 The rules decide *proof* relations from closure data; they say nothing about the truth or the faithfulness of a statement. The Jaccard thresholds are initial: the calibration may
 move them, and a move is a new `protocol.toml` version with every label recomputed, never an edit of labels.
+
+## Labels so far
+
+`human.jsonl` holds the 6 groups the first run (150 sampled groups: 139 alias, 8 similar, 3 independent) sent for a person's judgement. On 2026-11-17 the owner delegated the call to Claude while the whole
+programme is experimental; each line says so and the owner may overrule any of them (a change is a new line with the owner's name, never an edit). The one conservative choice: the borderline pair at Jaccard 0.60 stays *alias*.
