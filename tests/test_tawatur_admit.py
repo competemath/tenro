@@ -109,6 +109,26 @@ class Calibration(unittest.TestCase):
         self.assertFalse(r["feasible"])
         self.assertGreaterEqual(r["violations"], 1)
 
+    def test_the_answer_is_the_centre_of_the_equally_good_region_not_its_edge(self):
+        """one alias at df 0.40 and one independent at df 0.80 (waypoints equal): every a in (0.40, 0.80] separates them equally well, so the answer is the middle, and the region is reported"""
+        r = A.calibrate([(0.40, 0.0, "alias"), (0.80, 0.0, "independent")])
+        self.assertTrue(r["feasible"])
+        lo, hi = r["region"]["a"]
+        self.assertAlmostEqual(lo, 0.41, places=4)
+        self.assertAlmostEqual(hi, 0.80, places=4)
+        self.assertAlmostEqual(r["a"], (lo + hi) / 2, delta=0.01)
+        self.assertEqual(r["region"]["b"], [0.0, 0.0])
+        self.assertEqual(r["b"], 0.0)
+
+    def test_the_chosen_point_is_inside_the_region_and_feasible_with_two_axes(self):
+        pairs = [(0.1, 0.9, "alias"), (0.9, 0.1, "alias"), (0.9, 0.9, "independent")]
+        r = A.calibrate(pairs)
+        self.assertTrue(r["feasible"])
+        a, b = r["a"], r["b"]
+        self.assertTrue(r["region"]["a"][0] <= a <= r["region"]["a"][1] and r["region"]["b"][0] <= b <= r["region"]["b"][1])
+        for df, dw, lab in pairs:
+            self.assertEqual(df >= a and dw >= b, lab == "independent")
+
     def test_the_cli(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)

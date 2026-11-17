@@ -1,0 +1,30 @@
+{
+ "run": "https://github.com/competemath/tenro/actions/runs/44148817353",
+ "date": "2026-11-17",
+ "tengoku_tree_pin": "b77bb77bdfc882a2f989c95ab8a4268433792642",
+ "tengoku_tools_pin": "9404064b00237890707b8e3694d1eacbd2800c4c",
+ "protocol": "calibration/PROTOCOL.md (protocol.toml v2)",
+ "labels": "calibration/human.jsonl (delegated by the owner, experimental)",
+ "thresholds": {
+  "a": 0.57,
+  "b": 0.0,
+  "region": {
+   "a": [
+    0.4,
+    0.75
+   ],
+   "b": [
+    0.0,
+    0.0
+   ]
+  },
+  "violations": 0,
+  "feasible": true,
+  "slack": 0.0,
+  "alias_pairs": 197,
+  "independent_pairs": 5,
+  "pairs_used": 211,
+  "pairs_without_waypoints": 0,
+  "human_overrides": 8
+ }
+}
