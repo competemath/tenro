@@ -77,24 +77,38 @@ def status(routes: list[dict], a: float, b: float, floor: int = 5) -> dict:
 
 def calibrate(pairs: list[tuple[float, float, str]], step: float = 0.01) -> dict:
     """pairs: (footprint distance, waypoint distance, label). Finds (a, b) on a grid with every alias pair NOT divergent and every independent pair divergent, maximising the smallest
-    slack (how far every constraint is from being violated). If no thresholds satisfy all, returns the ones with the fewest violations and says so."""
+    slack (how far every constraint is from being violated). If no thresholds satisfy all, returns the ones with the fewest violations and says so.
+
+    Many grid points can be equally good (the first alias or independent pair to touch a constraint fixes the slack for a whole range of thresholds). The answer is then the CENTRE of that region,
+    the grid point of it nearest its centroid, not the first one scanned (which sits on the edge of what is feasible), and `region` reports the whole range: a threshold anywhere inside it
+    separates the labelled pairs equally well, so the data do not choose one value and the report says so."""
     alias = [(df, dw) for df, dw, lab in pairs if lab == "alias"]
     indep = [(df, dw) for df, dw, lab in pairs if lab == "independent"]
-    best: tuple[tuple[int, float], float, float] | None = None
+    best_key: tuple[int, float] | None = None
+    tied: list[tuple[float, float]] = []
     n = int(round(1 / step))
     for ia in range(n + 1):
         for ib in range(n + 1):
             a, b = ia * step, ib * step
             viol = sum(1 for df, dw in alias if df >= a and dw >= b) + sum(1 for df, dw in indep if not (df >= a and dw >= b))
             slack = min([max(a - df, b - dw) for df, dw in alias] + [min(df - a, dw - b) for df, dw in indep] + [1.0])
-            key = (-viol, slack)
-            if best is None or key > best[0]:
-                best = (key, a, b)
-    assert best is not None
-    (neg_viol, slack), a, b = best
+            key = (-viol, round(slack, 9))
+            if best_key is None or key > best_key:
+                best_key, tied = key, [(a, b)]
+            elif key == best_key:
+                tied.append((a, b))
+    assert best_key is not None
+    neg_viol, slack = best_key
+    ca = sum(x for x, _ in tied) / len(tied)
+    cb = sum(y for _, y in tied) / len(tied)
+    a, b = min(tied, key=lambda t: ((t[0] - ca) ** 2 + (t[1] - cb) ** 2, t))
     return {
         "a": round(a, 4),
         "b": round(b, 4),
+        "region": {
+            "a": [round(min(x for x, _ in tied), 4), round(max(x for x, _ in tied), 4)],
+            "b": [round(min(y for _, y in tied), 4), round(max(y for _, y in tied), 4)],
+        },
         "violations": -neg_viol,
         "feasible": neg_viol == 0,
         "slack": round(slack, 4),

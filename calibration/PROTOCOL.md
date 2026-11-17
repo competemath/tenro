@@ -35,3 +35,11 @@ move them, and a move is a new `protocol.toml` version with every label recomput
 
 `human.jsonl` holds the 6 groups the first run (150 sampled groups: 139 alias, 8 similar, 3 independent) sent for a person's judgement. On 2026-11-17 the owner delegated the call to Claude while the whole
 programme is experimental; each line says so and the owner may overrule any of them (a change is a new line with the owner's name, never an edit). The one conservative choice: the borderline pair at Jaccard 0.60 stays *alias*.
+
+## Result of the first complete run (2026-11-17, run 44148817353)
+
+`calibration/thresholds.json` holds it. 150 sampled cross-library groups (alias 139, similar 8, independent 3), 211 pairs, with the delegated labels of `human.jsonl`: **197 alias pairs, 5 independent pairs** (the 9 similar pairs carry no constraint).
+
+- **The footprint axis alone separates them.** Every alias pair has footprint distance at most 0.397 and every independent pair at least 0.753, so any threshold `a` in (0.397, 0.753] is feasible; the report gives the region and `a` = 0.57 is its centre (a first-scanned value would sit on the edge).
+- **The waypoint axis adds nothing on this sample.** `b` = 0 is the only feasible value: 61 of 197 alias pairs have waypoint distance above 0 (up to 1.0: a copied proof whose `have`s differ is still an alias), and one independent pair has waypoint distance 0 (neither proof has any `have`). Requiring waypoint divergence would call real aliases independent or real independents alias, so until more pairs say otherwise the tawatur rule behaves as footprint-only: **a = 0.57, b = 0**.
+- **Limits, stated.** Only 5 independent pairs, 3 groups; the alias label comes largely from rule 1 (same library chain), so the alias side is the larger and easier half. The result narrows nothing about proofs of the same statement inside one library, which the sample did not include. More independent pairs (and the owner's judgement of the delegated ones) are what would move these numbers.
