@@ -3,6 +3,7 @@
 
   power.py table                       the sample-size table the protocol prints (tests keep the protocol and this file equal)
   power.py n --delta D --psi P [--alpha A] [--power W]               problems needed to detect a gain of D when a fraction P of problems is solved by exactly one of the two systems
+  power.py resolvable --n N --psi P    the smallest gain and the smallest non-inferiority margin a held-out set of N problems can resolve (the inverse of `n`)
   power.py mcnemar B C                 the exact two-sided p-value for B problems only the hypothesis solves and C problems only the baseline solves
 
 Paired design: every problem is run under both systems, so only the discordant problems carry information. psi = P(exactly one system solves a problem) and D = P(only the hypothesis) - P(only the baseline).
@@ -32,6 +33,25 @@ def n_noninferiority(margin: float, psi: float, alpha: float = 0.05, power: floa
     return math.ceil((Z(1 - alpha) + Z(power)) ** 2 * psi / margin**2)
 
 
+def min_gain(n: int, psi: float, alpha: float = 0.05, power: float = 0.90) -> float | None:
+    """the smallest gain (to three decimals, rounded up) that `n` problems detect with the given power, None if no gain below `psi` is detectable: the inverse of `n_superiority`, which is decreasing in the gain"""
+    if n_superiority(psi * (1 - 1e-9), psi, alpha, power) > n:
+        return None
+    lo, hi = 1e-9, psi * (1 - 1e-9)
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if n_superiority(mid, psi, alpha, power) <= n:
+            hi = mid
+        else:
+            lo = mid
+    return math.ceil(hi * 1000) / 1000
+
+
+def min_margin(n: int, psi: float, alpha: float = 0.05, power: float = 0.90) -> float:
+    """the smallest non-inferiority margin (to three decimals, rounded up) that `n` problems can test: the inverse of `n_noninferiority`"""
+    return math.ceil(math.sqrt((Z(1 - alpha) + Z(power)) ** 2 * psi / n) * 1000) / 1000
+
+
 def mcnemar_exact(b: int, c: int) -> float:
     """Two-sided exact p-value: under no difference each discordant problem favours either system with probability 1/2."""
     n = b + c
@@ -45,6 +65,7 @@ def mcnemar_exact(b: int, c: int) -> float:
 PSIS = (0.10, 0.20, 0.30)
 DELTAS = (0.02, 0.03, 0.05)
 MARGINS = (0.01, 0.02)
+SIZES = (500, 1000, 2000, 4300)
 
 
 def table() -> str:
@@ -53,6 +74,18 @@ def table() -> str:
         sup = [str(n_superiority(d, psi)) for d in DELTAS]
         non = [str(n_noninferiority(m, psi)) for m in MARGINS]
         rows.append(f"| {psi:.2f} | " + " | ".join(sup + non) + " |")
+    return "\n".join(rows)
+
+
+def resolvable_table() -> str:
+    """what a held-out set of each size can resolve: the smallest gain it detects (power 0.90) and the smallest margin it can test, by the discordant fraction"""
+    rows = ["| problems | psi 0.10: gain / margin | psi 0.20: gain / margin | psi 0.30: gain / margin |", "|---|---|---|---|"]
+    for n in SIZES:
+        cells = []
+        for psi in PSIS:
+            g = min_gain(n, psi)
+            cells.append(f"{g:.3f} / {min_margin(n, psi):.3f}" if g is not None else f"none / {min_margin(n, psi):.3f}")
+        rows.append(f"| {n} | " + " | ".join(cells) + " |")
     return "\n".join(rows)
 
 
@@ -65,12 +98,17 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--psi", type=float, required=True)
     n.add_argument("--alpha", type=float, default=0.05)
     n.add_argument("--power", type=float, default=0.90)
+    r = sub.add_parser("resolvable")
+    r.add_argument("--n", type=int, required=True)
+    r.add_argument("--psi", type=float, required=True)
     m = sub.add_parser("mcnemar")
     m.add_argument("b", type=int)
     m.add_argument("c", type=int)
     a = ap.parse_args(argv)
     if a.cmd == "table":
         print(table())
+    elif a.cmd == "resolvable":
+        print(f"gain {min_gain(a.n, a.psi)}  margin {min_margin(a.n, a.psi)}")
     elif a.cmd == "n":
         print(n_superiority(a.delta, a.psi, a.alpha, a.power))
     else:

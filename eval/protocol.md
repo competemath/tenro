@@ -1,4 +1,4 @@
-# Evaluation protocol (version 1)
+# Evaluation protocol (version 2)
 
 This file is registered **before any campaign** (design fix 5): a hypothesis manifest carries the sha256 of this file (`tools/registry/validate.py hyp`), so a hypothesis cannot be registered
 before the protocol exists, and a change to this file makes every earlier registration stale. Runs of provers are the owner's: nothing in this repository runs one.
@@ -39,6 +39,19 @@ the variance by `psi`); `tests/test_eval_power.py` checks them against a simulat
 campaign registers `sample_size` from the row of the pilot's `psi`, rounded up to the table. **A campaign whose held-out set is smaller than its row is declared underpowered before it starts and cannot promote on
 that claim**: it may be run to learn, never to decide. Margins are not below what the held-out set can resolve: with fewer than 4,300 problems no solve-rate margin under 0.02 can be tested (at `psi` = 0.20).
 
+### 3b. What a held-out set of a given size can resolve (the inverse of the table above)
+
+The smallest gain a set of `n` problems detects with power 0.90 and the smallest non-inferiority margin it can test (`eval/power.py resolvable`), by the discordant fraction:
+
+| problems | psi 0.10: gain / margin | psi 0.20: gain / margin | psi 0.30: gain / margin |
+|---|---|---|---|
+| 500 | 0.046 / 0.042 | 0.065 / 0.059 | 0.080 / 0.072 |
+| 1000 | 0.033 / 0.030 | 0.046 / 0.042 | 0.057 / 0.051 |
+| 2000 | 0.023 / 0.021 | 0.033 / 0.030 | 0.040 / 0.036 |
+| 4300 | 0.016 / 0.015 | 0.023 / 0.020 | 0.028 / 0.025 |
+
+A claim finer than its row is declared underpowered (above). This is the table to read when choosing the size of the held-out set: it is a trade between the finest effect worth a promotion and the cost of curating and running `n` problems.
+
 **Multiplicity.** Hypotheses of one campaign are tested together with the Holm step-down at alpha = 0.05 over the primary tests of the hypotheses in that campaign; a hypothesis tested again on the same held-out
 problems after a change is a new hypothesis. A held-out problem used to tune a hypothesis is no longer held out: it moves to the development split, and the held-out list is replaced by problems not seen.
 
@@ -50,7 +63,15 @@ problems after a change is a new hypothesis. A held-out problem used to tune a h
 - **No contamination (I8).** Nothing from a held-out problem enters the library, the indexes, the harvest or the prover's context; the check runs at harvest time and again at promotion.
 - **No Mathlib A/B** until the five readiness gates pass (design P6).
 
-## 5. What this protocol does not settle
+## 5. The held-out set: a staged plan (experimental)
 
-The size of the held-out set and who curates it (a decision of the owner, taken when `tenro-eval` is created); the model and the budget `k` of a campaign (registered per campaign); the pilot's `psi`. Until they exist the
-sizes above are a plan, not a measurement.
+**Chosen on 2026-11-17 on the owner's delegation, while Tengai and Tenro are experimental; the owner may overrule any line.** Curation and the problems themselves stay the owner's: Claude never sees a held-out problem.
+
+- **Stage 0, pilot (learn only, never promotes).** The baseline run twice with different seeds on a pilot set of 300 problems. It measures `psi` (the noise floor); nothing is promoted from it.
+- **Stage 1, 1,000 problems in three equal strata** (post-cutoff, dependency-ablation, cross-domain: the strata of readiness gate 5). At `psi` = 0.20 it resolves gains of 0.046 and margins of 0.042, so a Stage 1 campaign registers a non-inferiority margin of at least 0.05 and hopes for large gains only; a finer claim is declared underpowered. This is what the experimental phase can afford.
+- **Stage 2, 4,300 problems.** Needed to test a margin of 0.02 (the row of 0.020 / 0.020 at `psi` = 0.20). Required before the owner considers a first release (docs/release-barrier.md in Tengai): no version 1 on Stage 1 evidence.
+- **Curation.** The owner selects the problems and the strata; the list of ids is hashed and the hash registered in the first manifest, before the pilot. A problem used to tune anything moves to the development split and is replaced.
+
+## 6. What this protocol does not settle
+
+Who curates and from where (the owner, when `tenro-eval` is created); the model and the budget `k` of a campaign (registered per campaign); the pilot's `psi`. Until they exist the sizes above are a plan, not a measurement.
