@@ -52,6 +52,11 @@ jobs:
           done
           cat "$RUNNER_TEMP/stats1.json"
           diff -r "$RUNNER_TEMP/idx1" "$RUNNER_TEMP/idx2" && echo "reproducible: the two builds are byte-identical"
+      - name: Lemma and definition counts, and the structural duplicates, of the slice
+        working-directory: ${{ runner.temp }}/tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/readiness/DataStats.lean" Init.Data.Nat > "$RUNNER_TEMP/counts.json"
+          python3 "$GITHUB_WORKSPACE/tools/readiness/data_stats.py" "$RUNNER_TEMP/counts.json" "$RUNNER_TEMP/out.tsv" --isnad-py scripts/isnad.py | tee "$RUNNER_TEMP/data-stats.json"
       - name: Waypoints of the slice
         run: |
           python3 - "$RUNNER_TEMP" <<'PY'
@@ -65,4 +70,4 @@ jobs:
           assert sets, "no waypoints at all"
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with: { name: slice, path: "${{ runner.temp }}/stats1.json\n${{ runner.temp }}/idx1", retention-days: 30 }
+        with: { name: slice, path: "${{ runner.temp }}/stats1.json\n${{ runner.temp }}/data-stats.json\n${{ runner.temp }}/idx1", retention-days: 30 }
