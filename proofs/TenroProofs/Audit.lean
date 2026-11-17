@@ -1,6 +1,7 @@
 import Lean
 import TenroProofs.Eviction
 import TenroProofs.Lens
+import TenroProofs.Normalise
 open Lean Elab Command
 
 /-!
