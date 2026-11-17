@@ -1,0 +1,10 @@
+name = "TenroProofs"
+defaultTargets = ["TenroProofs"]
+
+# Theorems about the tools of Tengai and Tenro (the eviction rule of the tawatur tier, the lens model): Lean core only, no dependency, so that they build in a minute and no
+# result here depends on Mathlib, Tengoku or the Tengai library. Every warning is an error: a `sorry` stops the build.
+[leanOptions]
+warningAsError = true
+
+[[lean_lib]]
+name = "TenroProofs"

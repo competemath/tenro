@@ -117,9 +117,26 @@ jobs:
         if: steps.changed.outputs.lean == 'true'
         run: lake build Tenro
 
+  proofs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: The proofs about the tools (Lean core only; every warning an error; the audit allows only the three standard axioms)
+        working-directory: proofs
+        run: |
+          lake build 2>&1 | tee build.log | tail -20
+          grep -q "audit: .* theorems, standard axioms only" build.log
+
   ci:
     if: always()
-    needs: [python, registry, dco, lean]
+    needs: [python, registry, dco, lean, proofs]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
