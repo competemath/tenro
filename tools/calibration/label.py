@@ -14,6 +14,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from util import distance, jaccard  # noqa: E402
+
 AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 STRENGTH = {"alias": 0, "similar": 1, "independent": 2}
 
@@ -35,18 +38,13 @@ def _outside(rec: dict, forced: list[str]) -> set[str]:
     return keep
 
 
-def _jaccard(a: set[str], b: set[str]) -> float:
-    union = a | b
-    return len(a & b) / len(union) if union else 1.0
-
-
 def _uses(rec: dict, other: dict) -> bool:
     return other["name"] in set(rec["closure"])
 
 
 def label_pair(a: dict, b: dict, p: dict) -> dict:
     ca, cb = _outside(a, p["forced_layer_modules"]), _outside(b, p["forced_layer_modules"])
-    j = _jaccard(ca, cb)
+    j = jaccard(ca, cb)
     margin = p["borderline_margin"]
     near = abs(j - p["alias_jaccard_min"]) <= margin or abs(j - p["independent_jaccard_max"]) <= margin
     collection = a["lib"] == b["lib"] and a["lib"] in p.get("collections", [])
@@ -75,7 +73,7 @@ def label_pair(a: dict, b: dict, p: dict) -> dict:
         "df": round(1 - j, 4),
     }
     if "waypoints" in a and "waypoints" in b:  # the second axis of the divergence (isnad.py waypoints), when the closures carry it
-        out["dw"] = round(1 - _jaccard(set(a["waypoints"]), set(b["waypoints"])), 4)
+        out["dw"] = round(distance(a["waypoints"], b["waypoints"]), 4)
     return out
 
 

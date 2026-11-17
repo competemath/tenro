@@ -20,13 +20,10 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from util import distance, read_jsonl  # noqa: E402
+
 CAP = 3
-
-
-def distance(a: set[str] | frozenset[str], b: set[str] | frozenset[str]) -> float:
-    """1 - Jaccard; two empty sets are identical (distance 0)."""
-    union = set(a) | set(b)
-    return 1 - len(set(a) & set(b)) / len(union) if union else 0.0
 
 
 def divergence(p: dict, q: dict) -> tuple[float, float]:
@@ -110,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
     """admit.py calibrate PAIRS.jsonl   (lines {"df", "dw", "label"})   |   admit.py status FOLDER.json --a A --b B   (a JSON list of routes)"""
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) >= 2 and argv[0] == "calibrate":
-        rows = [json.loads(ln) for ln in Path(argv[1]).read_text(encoding="utf-8").splitlines() if ln.strip()]
+        rows = read_jsonl(argv[1])
         print(json.dumps(calibrate([(r["df"], r["dw"], r["label"]) for r in rows]), indent=1))
         return 0
     if len(argv) >= 6 and argv[0] == "status" and argv[2] == "--a" and argv[4] == "--b":

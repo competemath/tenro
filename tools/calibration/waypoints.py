@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from tengoku_isnad import load_module  # noqa: E402
+from util import read_jsonl  # noqa: E402
 
 
 def merge(records: list[dict], have_lines: list[str], waypoint_sets, assume_complete: bool) -> list[dict]:
@@ -35,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(argv) < 4 or argv[2] != "--isnad-py":
         print(__doc__)
         return 2
-    records = [json.loads(ln) for ln in Path(argv[0]).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    records = read_jsonl(argv[0])
     haves = Path(argv[1]).read_text(encoding="utf-8").splitlines()
     mod = load_module(Path(argv[3]))
     for r in merge(records, haves, mod.waypoint_sets, "--assume-complete" in argv):

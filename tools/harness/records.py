@@ -22,6 +22,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from util import read_jsonl  # noqa: E402
+
 HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 OUTCOMES = ("solved", "unsolved", "infra_error")
@@ -87,10 +90,6 @@ def summarise(runs: list[dict], validity: list[dict] | None = None) -> dict:
         "validity": {"tasks": len(tasks), "two_sided_valid": two_sided},
         "parity": {"arms": arms, "differing_from_the_first": differing},
     }
-
-
-def read_jsonl(path: Path) -> list[dict]:
-    return [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
 
 def main(argv: list[str] | None = None) -> int:
