@@ -79,24 +79,12 @@ jobs:
           wc -l ../export.ndjson ../core-modules.tsv
       - name: Reduced closures
         run: python3 tools/closure/closure.py export.ndjson --names-file names.txt --meta meta.tsv --modules core-modules.tsv > closures.jsonl
-      - name: Waypoints (the ids of the statements of each proof's haves), when the pinned Tengoku can say them
-        continue-on-error: true   # a failure here must never cost the closures, the labels and the summary an hour of work
-        run: |
-          # does the tengoku-isnad at tengoku-tools.pin know --haves? An unknown option is silently ignored by it, so ask the source, not the program
-          if grep -q -e '--haves' "$TOOLS/TengokuIsnad.lean"; then
-            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad" --extra-arg=--haves --prefix isnad1-have)
-            complete=""; [ -s haves-failed.txt ] || complete="--assume-complete"
-            python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py "$TOOLS/scripts/isnad.py" $complete > closures-wp.jsonl
-            mv closures-wp.jsonl closures.jsonl
-          else
-            echo "::notice::the Tengoku at tengoku-tools.pin has no tengoku-isnad --haves (bump tengoku-tools.pin past the waypoints PR): the pairs carry no second axis"
-          fi
       - name: Tengoku's independence report on them (reference, parameters of docs/tawatur.md)
         run: python3 "$TOOLS/scripts/tawatur.py" report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
       - name: Label by the written protocol and summarise
         run: |
           python3 tools/calibration/label.py --input closures.jsonl > labels.jsonl
-          python3 tools/calibration/thresholds.py labels.jsonl > thresholds.json
+          python3 tools/calibration/thresholds.py labels.jsonl --human calibration/human.jsonl > thresholds.json
           cat thresholds.json
           python3 tools/calibration/summary.py labels.jsonl --stats groups-stats.json --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -113,4 +101,67 @@ jobs:
             summary.md
             thresholds.json
             isnad-failed.txt
+            export-modules.txt
+            names.txt
+          retention-days: 30
+
+  # The second axis (the waypoints) in a job of its own: the first one (closures, labels, thresholds on the footprint axis) is already uploaded, so a runner that is lost here
+  # (it was, once, after two hours) costs only this job. It reads only the sampled theorems and gives every process a time limit, one at a time.
+  waypoints:
+    needs: groups
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions: { contents: read }
+    steps:
+      - name: Free disk (Tengoku's compiled cache is several GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm /usr/share/miniconda /usr/local/share/powershell /usr/local/lib/node_modules /opt/az /usr/local/graalvm /usr/local/share/chromium
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Tengoku at the pin, with its compiled cache
+        run: scripts/tengoku-setup.sh
+      - name: tengoku-isnad and the scripts at tengoku-tools.pin (the tree is at tengoku.pin; the tools may be newer than the newest published cache)
+        run: |
+          pin="$(tr -d '[:space:]' < tengoku-tools.pin)"
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]] || { echo "tengoku-tools.pin must hold a full 40-character commit"; exit 1; }
+          git clone -q --filter=blob:none --no-checkout https://github.com/competemath/tengoku "$RUNNER_TEMP/tengoku-tools"
+          cd "$RUNNER_TEMP/tengoku-tools"
+          git sparse-checkout set --no-cone '/TengokuIsnad.lean' '/scripts/' '/lakefile.toml' '/lean-toolchain' '/tools/isnad/'
+          git checkout -q "$pin"
+          lake build tengoku-isnad 2>&1 | tail -3
+          echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: calibration
+      - name: Waypoints (the ids of the statements of each proof's haves), for the sampled theorems only
+        run: |
+          if ! grep -q -e '--haves' "$TOOLS/TengokuIsnad.lean"; then
+            echo "::error::the Tengoku at tengoku-tools.pin has no tengoku-isnad --haves (bump tengoku-tools.pin past the waypoints PR)"; exit 1
+          fi
+          (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --names-meta ../meta.tsv --out ../haves.txt --failed ../haves-failed.txt --jobs 1 --batch 5 --timeout 900 --exe "$TOOLS/.lake/build/bin/tengoku-isnad" --extra-arg=--haves --prefix isnad1-have)
+          complete=""; [ -s haves-failed.txt ] || complete="--assume-complete"
+          python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py "$TOOLS/scripts/isnad.py" $complete > closures-wp.jsonl
+      - name: Label with both axes, calibrate (the owner's delegated labels override the rules), summarise
+        run: |
+          python3 tools/calibration/label.py --input closures-wp.jsonl > labels-wp.jsonl
+          python3 tools/calibration/thresholds.py labels-wp.jsonl --human calibration/human.jsonl > thresholds-wp.json
+          cat thresholds-wp.json
+          python3 tools/calibration/summary.py labels-wp.jsonl --stats groups-stats.json --tags-read "$(python3 tools/calibration/groups.py tags < dup.json)" | tee summary-wp.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: calibration-wp
+          path: |
+            closures-wp.jsonl
+            labels-wp.jsonl
+            thresholds-wp.json
+            summary-wp.md
+            haves.txt
+            haves-failed.txt
           retention-days: 30

@@ -1,4 +1,7 @@
+import os
+import stat
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -53,3 +56,35 @@ class RunIsnad(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OnlyTheListedTheorems(unittest.TestCase):
+    def test_names_by_module_and_the_arguments_of_a_batch(self):
+        with tempfile.TemporaryDirectory() as d:
+            meta = Path(d) / "meta.tsv"
+            meta.write_text("T.b\tid1\tL\tM1\nT.a\tid2\tL\tM1\nT.c\tid3\tL2\tM2\nshort\n", encoding="utf-8")
+            by = r.names_by_module(meta)
+            self.assertEqual(by, {"M1": ["T.b", "T.a"], "M2": ["T.c"]})
+            self.assertEqual(r.name_args(["M1"], by), ("--name", "T.a", "--name", "T.b"))
+            self.assertEqual(r.name_args(["M2", "M1", "M9"], by), ("--name", "T.a", "--name", "T.b", "--name", "T.c"))
+            self.assertEqual(r.name_args(["M9"], by), ())
+            self.assertEqual(r.name_args(["M1"], None), (), "without a table the whole module is read")
+
+
+class Timeout(unittest.TestCase):
+    def test_a_process_over_the_limit_is_a_failure_and_the_batch_is_retried_module_by_module(self):
+        with tempfile.TemporaryDirectory() as d:
+            lake = Path(d) / "lake"
+            lake.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+            lake.chmod(lake.stat().st_mode | stat.S_IXUSR)
+            old = os.environ["PATH"]
+            os.environ["PATH"] = f"{d}:{old}"
+            try:
+                code, lines, err = r.run_exe(["A"], "x", timeout=0.3)
+                self.assertEqual((code, lines), (124, []))
+                self.assertIn("timeout", err)
+                recs, failed = r.run_all(["A", "B"], lambda part: r.run_exe(part, "x", timeout=0.3), batch=2, jobs=1)
+            finally:
+                os.environ["PATH"] = old
+        self.assertEqual(recs, [])
+        self.assertEqual([m for m, _ in failed], ["A", "B"])
