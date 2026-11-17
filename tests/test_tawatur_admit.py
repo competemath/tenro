@@ -129,6 +129,37 @@ class Calibration(unittest.TestCase):
         for df, dw, lab in pairs:
             self.assertEqual(df >= a and dw >= b, lab == "independent")
 
+    def test_the_stored_calibration_is_the_default_and_is_consistent_with_itself(self):
+        a, b = A.calibrated_thresholds()
+        th = json.loads(A.THRESHOLDS_FILE.read_text(encoding="utf-8"))["thresholds"]
+        self.assertTrue(th["feasible"])
+        self.assertEqual((a, b), (th["a"], th["b"]))
+        self.assertTrue(th["region"]["a"][0] <= a <= th["region"]["a"][1])
+
+    def test_an_infeasible_or_inconsistent_stored_result_gives_no_defaults(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "t.json"
+            good = {"a": 0.5, "b": 0.0, "region": {"a": [0.4, 0.7], "b": [0.0, 0.0]}, "feasible": True, "violations": 0}
+            f.write_text(json.dumps({"thresholds": good}))
+            self.assertEqual(A.calibrated_thresholds(f), (0.5, 0.0))
+            f.write_text(json.dumps({"thresholds": {**good, "feasible": False, "violations": 2}}))
+            with self.assertRaises(ValueError):
+                A.calibrated_thresholds(f)
+            f.write_text(json.dumps({"thresholds": {**good, "a": 0.9}}))
+            with self.assertRaises(ValueError):
+                A.calibrated_thresholds(f)
+
+    def test_status_uses_the_calibrated_thresholds_unless_told_otherwise(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / "folder.json"
+            f.write_text(
+                json.dumps([{**r, "footprint": sorted(r["footprint"]), "waypoints": sorted(r["waypoints"])} for r in (R1, R2, R3)])
+            )
+            self.assertEqual(A.main(["status", str(f)]), 0)
+            self.assertEqual(A.main(["status", str(f), "--a", "0.5", "--b", "0.5"]), 0)
+            self.assertEqual(A.main(["status", str(f), "--a", "0.5"]), 0)
+            self.assertEqual(A.main(["status", str(f), "--nope", "1"]), 2)
+
     def test_the_cli(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
