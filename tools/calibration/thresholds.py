@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tawatur"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
 from admit import calibrate  # noqa: E402
+from util import read_jsonl  # noqa: E402
 
 
 def pairs_of(groups: list[dict], human: list[dict]) -> tuple[list[tuple[float, float, str]], int]:
@@ -35,12 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     if not argv:
         print(__doc__)
         return 2
-    groups = [json.loads(ln) for ln in Path(argv[0]).read_text(encoding="utf-8").splitlines() if ln.strip()]
-    human = (
-        [json.loads(ln) for ln in Path(argv[argv.index("--human") + 1]).read_text(encoding="utf-8").splitlines() if ln.strip()]
-        if "--human" in argv
-        else []
-    )
+    groups = read_jsonl(argv[0])
+    human = read_jsonl(argv[argv.index("--human") + 1]) if "--human" in argv else []
     pairs, skipped = pairs_of(groups, human)
     result = {**calibrate(pairs), "pairs_used": len(pairs), "pairs_without_waypoints": skipped, "human_overrides": len(human)}
     print(json.dumps(result, indent=1))
