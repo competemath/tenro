@@ -35,6 +35,16 @@ jobs:
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: Tengoku at the pin, with its compiled cache
         run: scripts/tengoku-setup.sh
+      - name: tengoku-isnad and the scripts at tengoku-tools.pin (the tree is at tengoku.pin; the tools may be newer than the newest published cache)
+        run: |
+          pin="$(tr -d '[:space:]' < tengoku-tools.pin)"
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]] || { echo "tengoku-tools.pin must hold a full 40-character commit"; exit 1; }
+          git clone -q --filter=blob:none --no-checkout https://github.com/competemath/tengoku "$RUNNER_TEMP/tengoku-tools"
+          cd "$RUNNER_TEMP/tengoku-tools"
+          git sparse-checkout set --no-cone '/TengokuIsnad.lean' '/scripts/' '/lakefile.toml' '/lean-toolchain' '/tools/isnad/'
+          git checkout -q "$pin"
+          lake build tengoku-isnad 2>&1 | tail -3
+          echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
       - name: Tags in the sources, the ids that occur twice
         run: |
           python3 tools/calibration/groups.py scan .tengoku > dup.json
@@ -42,13 +52,12 @@ jobs:
       - name: Recompute the ids of those modules (tengoku-isnad; a module that does not import is listed, not fatal)
         run: |
           cd .tengoku
-          lake build tengoku-isnad 2>&1 | tail -3
           python3 ../tools/calibration/groups.py modules < ../dup.json > ../modules.txt
-          python3 ../tools/calibration/run_isnad.py --modules ../modules.txt --out ../isnad.tsv --failed ../isnad-failed.txt --jobs 2
+          python3 ../tools/calibration/run_isnad.py --modules ../modules.txt --out ../isnad.tsv --failed ../isnad-failed.txt --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad"
           wc -l ../isnad.tsv ../isnad-failed.txt
       - name: The group table and the names to export
         run: |
-          python3 tools/calibration/groups.py meta --dup dup.json --isnad-py .tengoku/scripts/isnad.py < isnad.tsv > meta-all.tsv
+          python3 tools/calibration/groups.py meta --dup dup.json --isnad-py "$TOOLS/scripts/isnad.py" < isnad.tsv > meta-all.tsv
           # only groups with theorems from two or more libraries can be other than alias (rule 1); a deterministic sample of them is exported (the export of all would not fit in memory)
           python3 tools/calibration/groups.py select --max-groups 150 --stats groups-stats.json < meta-all.tsv > meta.tsv
           cat groups-stats.json
@@ -73,17 +82,17 @@ jobs:
       - name: Waypoints (the ids of the statements of each proof's haves), when the pinned Tengoku can say them
         continue-on-error: true   # a failure here must never cost the closures, the labels and the summary an hour of work
         run: |
-          # does the pinned tengoku-isnad know --haves? An unknown option is silently ignored by it, so ask the source, not the program
-          if grep -q -e '--haves' .tengoku/TengokuIsnad.lean; then
-            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --extra-arg=--haves --prefix isnad1-have)
+          # does the tengoku-isnad at tengoku-tools.pin know --haves? An unknown option is silently ignored by it, so ask the source, not the program
+          if grep -q -e '--haves' "$TOOLS/TengokuIsnad.lean"; then
+            (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules ../export-modules.txt --out ../haves.txt --failed ../haves-failed.txt --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad" --extra-arg=--haves --prefix isnad1-have)
             complete=""; [ -s haves-failed.txt ] || complete="--assume-complete"
-            python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py .tengoku/scripts/isnad.py $complete > closures-wp.jsonl
+            python3 tools/calibration/waypoints.py closures.jsonl haves.txt --isnad-py "$TOOLS/scripts/isnad.py" $complete > closures-wp.jsonl
             mv closures-wp.jsonl closures.jsonl
           else
-            echo "::notice::the pinned Tengoku has no tengoku-isnad --haves (bump tengoku.pin past the waypoints PR): the pairs carry no second axis"
+            echo "::notice::the Tengoku at tengoku-tools.pin has no tengoku-isnad --haves (bump tengoku-tools.pin past the waypoints PR): the pairs carry no second axis"
           fi
       - name: Tengoku's independence report on them (reference, parameters of docs/tawatur.md)
-        run: python3 .tengoku/scripts/tawatur.py report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
+        run: python3 "$TOOLS/scripts/tawatur.py" report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
       - name: Label by the written protocol and summarise
         run: |
           python3 tools/calibration/label.py --input closures.jsonl > labels.jsonl
