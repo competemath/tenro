@@ -58,8 +58,8 @@ jobs:
       - name: The group table and the names to export
         run: |
           python3 tools/calibration/groups.py meta --dup dup.json --isnad-py "$TOOLS/scripts/isnad.py" < isnad.tsv > meta-all.tsv
-          # only groups with theorems from two or more libraries can be other than alias (rule 1); a deterministic sample of them is exported (the export of all would not fit in memory)
-          python3 tools/calibration/groups.py select --max-groups 150 --stats groups-stats.json < meta-all.tsv > meta.tsv
+          # only groups with theorems from two or more libraries can be other than alias (rule 1); all of them are exported, in shards (there are only a few hundred: the sample of the first run was a part of a small population)
+          python3 tools/calibration/groups.py select --max-groups 1000 --stats groups-stats.json < meta-all.tsv > meta.tsv
           cat groups-stats.json
           cut -f1 meta.tsv > names.txt
           cut -f4 meta.tsv | sort -u > export-modules.txt
@@ -69,16 +69,21 @@ jobs:
           git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
           git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
           cd "$RUNNER_TEMP/lean4export" && lake build 2>&1 | tail -3
-      - name: One targeted export of exactly those declarations, and where Lean's core is defined
+      - name: Export and reduce, in shards (the export of everything at once does not fit in memory; a group is never split between shards)
         run: |
-          mapfile -t mods < export-modules.txt
-          mapfile -t names < names.txt
-          cd .tengoku
-          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > ../export.ndjson
-          lake env lean --run ../tools/calibration/CoreModules.lean > ../core-modules.tsv
-          wc -l ../export.ndjson ../core-modules.tsv
-      - name: Reduced closures
-        run: python3 tools/closure/closure.py export.ndjson --names-file names.txt --meta meta.tsv --modules core-modules.tsv > closures.jsonl
+          (cd .tengoku && lake env lean --run ../tools/calibration/CoreModules.lean > ../core-modules.tsv)
+          : > closures.jsonl
+          for k in 0 1 2 3; do
+            python3 tools/calibration/groups.py shard --of 4 --index "$k" < meta.tsv > "meta-$k.tsv"
+            [ -s "meta-$k.tsv" ] || continue
+            cut -f1 "meta-$k.tsv" > "names-$k.txt"
+            mapfile -t mods < <(cut -f4 "meta-$k.tsv" | sort -u)
+            mapfile -t names < "names-$k.txt"
+            (cd .tengoku && lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}") > "export-$k.ndjson"
+            python3 tools/closure/closure.py "export-$k.ndjson" --names-file "names-$k.txt" --meta "meta-$k.tsv" --modules core-modules.tsv >> closures.jsonl
+            rm -f "export-$k.ndjson"
+            wc -l "meta-$k.tsv" closures.jsonl
+          done
       - name: Tengoku's independence report on them (reference, parameters of docs/tawatur.md)
         run: python3 "$TOOLS/scripts/tawatur.py" report --k 3 --floor 5 --all < closures.jsonl > tawatur-report.jsonl
       - name: Label by the written protocol and summarise
