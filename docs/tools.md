@@ -20,3 +20,13 @@ Each one reads and writes files, is deterministic where it can be, and has tests
 | `common/tengoku_isnad.py` | reads Tengoku's isnad output with Tengoku's own `isnad.py` (the recipe is never copied here) | | |
 
 Local development: a minimal Lean is enough for the fixtures (`lake build` in `tools/soundness/fixture` or `tools/scramble/fixture`); the Tengoku tree and Mathlib are never built locally.
+
+## The probes on real code (Lean core's `Init.Data.Nat`, 1,432 theorems; numbers from `tools/soundness/Probes.lean`, produced by the `slice` workflow on every change)
+
+| Probe | Reads | Result |
+| --- | --- | --- |
+| `unused-hyps` (hypothesis dropping) | the proof term | 754 propositional hypotheses read, **0 unused** (the verdict refuses a probe that reports a count of 0 theorems) |
+| `cx-sweep` (counterexample, one hypothesis dropped at a time, values 0..3, at most 512 assignments) | the statement only | 801 candidate generalisations: **70 out of reach** (a binder that is not `Nat`, `Int` or `Bool`), 731 searched, **698 rejected (95.5% of those searched) without a proof attempt**, 33 left open |
+
+The 33 that stay open are the generalisations worth a proof attempt, but the number is an upper bound on them: a conclusion the probe cannot evaluate (an existential, for instance) is never refuted, so
+`exists_eq_add_one_of_ne_zero` with its hypothesis dropped is among them although it is false at `n = 0`. A sharper count needs the number of assignments on which the conclusion was decided; it is the next thing to add.
