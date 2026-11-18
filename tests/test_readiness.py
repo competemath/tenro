@@ -17,6 +17,7 @@ GOOD = {
     "obfuscation": {"pass_rate_plain": 0.40, "pass_rate_scrambled": 0.37, "n": 500},
     "migration": {"denominator": 1000, "accepted": 990, "rate": 0.99, "rejected": []},
     "migration_integrity_violations": 0,
+    "migration_corpus": [{"library": "x", "old": 1000, "survival": 0.97, "fidelity": 1.0}],
     "tamper": {"cases": 50, "undetected": 0},
     "harness": {"runs": 1000, "infra_errors": 3},
     "validity": {"tasks": 200, "two_sided_valid": 200},
@@ -96,10 +97,15 @@ class Gather(unittest.TestCase):
                 json.dumps({"denominator": 10, "accepted": 10, "rate": 1.0, "rejected": [], "integrity_violations": 0})
             )
             (d / "mathlib-load.json").write_text(json.dumps({"net_median_s": 3.0}))
+            (d / "migration-corpus").mkdir()
+            (d / "migration-corpus" / "x.json").write_text(
+                json.dumps({"library": "x", "summary": {"old": 10, "survival": 1.0, "fidelity": 1.0}})
+            )
             (d / "budget.toml").write_text("[load]\ncap_net_median_s = 0.25\n[scale]\ncap_ms_per_module = 0.3\n")
             got = G.gather(d, d / "budget.toml")
             self.assertEqual(
-                sorted(got), ["budget", "load", "mathlib_load_net_median_s", "migration", "migration_integrity_violations", "scale"]
+                sorted(got),
+                ["budget", "load", "mathlib_load_net_median_s", "migration", "migration_corpus", "migration_integrity_violations", "scale"],
             )
             self.assertEqual(got["migration_integrity_violations"], 0)
             self.assertNotIn("tamper", got)
@@ -108,6 +114,54 @@ class Gather(unittest.TestCase):
             self.assertEqual(statuses(rep)["3"], "pass")
             self.assertEqual(G.main([str(d)]), 0)
             self.assertEqual(G.main([]), 2)
+
+
+class CorpusAndSources(unittest.TestCase):
+    CORPUS = [
+        {"library": "a", "old": 100, "survival": 0.95, "fidelity": 1.0},
+        {"library": "b", "old": 50, "survival": 1.0, "fidelity": 0.99},
+    ]
+
+    def crit(self, inputs):
+        gate3 = R.report(inputs)["gates"][2]
+        return next(c for c in gate3["criteria"] if c["criterion"].startswith("fidelity of the survivors"))
+
+    def test_the_corpus_criterion_uses_the_worst_fidelity_and_reports_survival_beside_it(self):
+        c = self.crit({"migration_corpus": self.CORPUS})
+        self.assertEqual((c["status"], c["value"]), ("pass", 0.99))
+        self.assertIn("survival 95.00%", c["note"])
+        self.assertIn("owner's to accept", c["note"])
+
+    def test_one_re_cut_below_the_threshold_fails_it_and_none_is_unmeasured(self):
+        bad = [*self.CORPUS, {"library": "c", "old": 10, "survival": 1.0, "fidelity": 0.5}]
+        self.assertEqual(self.crit({"migration_corpus": bad})["status"], "fail")
+        self.assertEqual(self.crit({})["status"], "unmeasured")
+        self.assertEqual(self.crit({"migration_corpus": []})["status"], "unmeasured")
+
+    def test_an_extra_criterion_can_only_make_the_gate_harder_never_easier(self):
+        full = dict(GOOD, migration_corpus=[{"library": "c", "old": 10, "survival": 1.0, "fidelity": 0.5}])
+        self.assertEqual(R.report(full)["gates"][2]["status"], "fail")
+        self.assertEqual(R.report(dict(GOOD, migration_corpus=self.CORPUS))["gates"][2]["status"], "pass")
+
+    def test_the_markdown_says_where_each_unmeasured_criterion_comes_from(self):
+        md = R.markdown(R.report({}))
+        self.assertIn("## Not measured yet, and where it comes from", md)
+        self.assertIn("retrieval.json", md)
+        self.assertIn("verdict.json", md)
+        self.assertNotIn("no source named", md, "every criterion of the report has a named source")
+        self.assertNotIn("Not measured yet", R.markdown(R.report(GOOD)))
+
+    def test_gather_reads_a_directory_of_re_cut_files(self):
+        import gather as G
+
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "migration-corpus").mkdir()
+            (d / "migration-corpus" / "x.json").write_text(
+                json.dumps({"library": "x", "summary": {"old": 7, "survival": 0.5, "fidelity": 1.0}}), encoding="utf-8"
+            )
+            got = G.gather(d)
+        self.assertEqual(got["migration_corpus"], [{"library": "x", "old": 7, "survival": 0.5, "fidelity": 1.0}])
 
 
 if __name__ == "__main__":
