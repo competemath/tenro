@@ -1,0 +1,28 @@
+{
+ "library": "navier-stokes-euler",
+ "old": "tengoku f64bb67cd (the first cut, 2026-10-16 09:27 UTC)",
+ "new": "tengoku 1487abe2f (the re-cut, part 8 of 8, 2026-10-21)",
+ "manifest": "data/intake/navier-stokes-euler/manifest.jsonl",
+ "tool": "tools/lens/reseed.py classify",
+ "summary": {
+  "old": 14099,
+  "new": 32855,
+  "unchanged": 13383,
+  "moved": 0,
+  "restated": 0,
+  "renamed": 1,
+  "removed": 715,
+  "added": 19471,
+  "survival": 0.949287,
+  "fidelity": 1.0
+ },
+ "removed_by_module": {
+  "theorems": 715,
+  "modules": 122,
+  "modules_gone_entirely": 121,
+  "theorems_in_modules_gone_entirely": 695,
+  "theorems_in_the_one_partly_removed_module": 20
+ },
+ "old_modules": 912,
+ "old_modules_surviving": 791
+}
