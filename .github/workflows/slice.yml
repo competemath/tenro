@@ -52,6 +52,18 @@ jobs:
           done
           cat "$RUNNER_TEMP/stats1.json"
           diff -r "$RUNNER_TEMP/idx1" "$RUNNER_TEMP/idx2" && echo "reproducible: the two builds are byte-identical"
+      - name: The intent index (the docstrings, name-blind), built twice, and one search
+        working-directory: ${{ runner.temp }}/tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/index/Docs.lean" Init.Data.Nat > "$RUNNER_TEMP/docs.tsv" 2> "$RUNNER_TEMP/docs.err"
+          tail -1 "$RUNNER_TEMP/docs.err"
+          for i in 1 2; do
+            python3 "$GITHUB_WORKSPACE/tools/index/intent.py" build --docs "$RUNNER_TEMP/docs.tsv" --isnad "$RUNNER_TEMP/out.tsv" --isnad-py scripts/isnad.py --out "$RUNNER_TEMP/intent$i" > "$RUNNER_TEMP/intent-stats$i.json"
+          done
+          cat "$RUNNER_TEMP/intent-stats1.json"
+          diff -r "$RUNNER_TEMP/intent1" "$RUNNER_TEMP/intent2" && echo "reproducible: the two intent builds are byte-identical"
+          test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["documents"])' "$RUNNER_TEMP/intent1/intent-stats.json")" -ge 20
+          python3 "$GITHUB_WORKSPACE/tools/index/intent.py" search "$RUNNER_TEMP/intent1" "division with remainder of natural numbers" -k 5
       - name: Lemma and definition counts, and the structural duplicates, of the slice
         working-directory: ${{ runner.temp }}/tengoku
         run: |
