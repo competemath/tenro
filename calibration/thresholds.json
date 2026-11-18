@@ -1,6 +1,7 @@
 {
- "run": "https://github.com/competemath/tenro/actions/runs/44148817353",
- "date": "2026-11-17",
+ "run": "https://github.com/competemath/tenro/actions/runs/44177063777",
+ "date": "2026-11-18",
+ "population": "all 252 cross-library statement groups (548 theorems), a census",
  "tengoku_tree_pin": "b77bb77bdfc882a2f989c95ab8a4268433792642",
  "tengoku_tools_pin": "9404064b00237890707b8e3694d1eacbd2800c4c",
  "protocol": "calibration/PROTOCOL.md (protocol.toml v2)",
@@ -21,10 +22,10 @@
   "violations": 0,
   "feasible": true,
   "slack": 0.0,
-  "alias_pairs": 197,
-  "independent_pairs": 5,
-  "pairs_used": 211,
+  "alias_pairs": 321,
+  "independent_pairs": 6,
+  "pairs_used": 341,
   "pairs_without_waypoints": 0,
-  "human_overrides": 8
+  "human_overrides": 9
  }
 }
