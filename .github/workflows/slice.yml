@@ -77,9 +77,9 @@ jobs:
         run: |
           lake env lean --run "$GITHUB_WORKSPACE/tools/soundness/Probes.lean" cx-sweep Init.Data.Nat > "$RUNNER_TEMP/sweep.out" 2> "$RUNNER_TEMP/sweep.err"
           tail -1 "$RUNNER_TEMP/sweep.err"
-          read -r tag theorems cands oor searched rejected < <(head -1 "$RUNNER_TEMP/sweep.out" | tr '\t' ' ')
+          read -r tag theorems cands oor searched rejected undecided < <(head -1 "$RUNNER_TEMP/sweep.out" | tr '\t' ' ')
           test "$tag" = examined && test "$theorems" -ge 1000 && test "$searched" -ge 500 && test "$rejected" -ge 1
-          echo "caught without a proof attempt: $rejected of $searched searched (of $cands candidates, $oor out of reach)"
+          echo "caught without a proof attempt: $rejected of $searched searched (of $cands candidates, $oor out of reach); $undecided could not be decided either way"
       - name: Lemma and definition counts, and the structural duplicates, of the slice
         working-directory: ${{ runner.temp }}/tengoku
         run: |

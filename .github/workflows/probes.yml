@@ -32,8 +32,8 @@ jobs:
           lake env lean --run ../Probes.lean unused-hyps Pr.Cases | tee "$RUNNER_TEMP/probe.out"
       - name: Exactly the hypotheses the proofs never use
         run: |
-          # it says what it looked at: the nine theorems of the fixture and their eleven propositional hypotheses
-          test "$(head -1 "$RUNNER_TEMP/probe.out")" = "$(printf 'examined\t9\t11')"
+          # it says what it looked at: the ten theorems of the fixture and their twelve propositional hypotheses
+          test "$(head -1 "$RUNNER_TEMP/probe.out")" = "$(printf 'examined\t10\t12')"
           grep '^unused' "$RUNNER_TEMP/probe.out" | cut -f2,4 | sort > "$RUNNER_TEMP/got.txt"
           printf 'Pr.cx_bool_int\t2\nPr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
           diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
@@ -59,7 +59,7 @@ jobs:
         working-directory: tools/soundness/fixture
         run: |
           lake env lean --run ../Probes.lean cx-sweep Pr.Cases > "$RUNNER_TEMP/sweep.out"
-          test "$(head -1 "$RUNNER_TEMP/sweep.out")" = "$(printf 'examined\t9\t10\t2\t8\t5')"
+          test "$(head -1 "$RUNNER_TEMP/sweep.out")" = "$(printf 'examined\t10\t11\t2\t9\t5\t1')"
           tail -n +2 "$RUNNER_TEMP/sweep.out" | cut -f1-3 | sort > "$RUNNER_TEMP/sweep.got"
-          printf 'open\tPr.cx_bool_int\t2\nopen\tPr.unused_hyp\t2\nopen\tPr.unused_rec\t1\nrejected\tPr.cx_needs_hyp\t1\nrejected\tPr.one_of_two\t2\nrejected\tPr.one_of_two\t3\nrejected\tPr.used_hyps\t2\nrejected\tPr.used_hyps\t3\n' | sort > "$RUNNER_TEMP/sweep.want"
+          printf 'open\tPr.cx_bool_int\t2\nopen\tPr.unused_hyp\t2\nopen\tPr.unused_rec\t1\nundecided\tPr.cx_exists\t1\nrejected\tPr.cx_needs_hyp\t1\nrejected\tPr.one_of_two\t2\nrejected\tPr.one_of_two\t3\nrejected\tPr.used_hyps\t2\nrejected\tPr.used_hyps\t3\n' | sort > "$RUNNER_TEMP/sweep.want"
           diff "$RUNNER_TEMP/sweep.want" "$RUNNER_TEMP/sweep.got"
