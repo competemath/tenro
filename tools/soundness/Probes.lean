@@ -7,6 +7,11 @@ counterexample <Module> <Theorem> [<index>,...] (the COUNTEREXAMPLE probe): the 
 (0..3, -3..3, both booleans) that satisfies the remaining hypotheses; prints `counterexample<TAB>theorem<TAB>dropped<TAB>a=.., b=..` or `none<TAB>theorem<TAB>dropped`. `none` proves nothing (the range is small, other types are skipped);
 a counterexample rejects a candidate generalisation without a proof attempt.
 
+cx-sweep <Module>... (the COUNTEREXAMPLE probe over a whole library): for every theorem and every one of its propositional hypotheses, the generalisation with that one hypothesis dropped is tried on the
+small values; prints `examined<TAB>theorems<TAB>candidates<TAB>out-of-reach<TAB>searched<TAB>rejected` and, per searched candidate, `rejected<TAB>theorem<TAB>index<TAB>values` or `open<TAB>theorem<TAB>index` (no counterexample
+found: the generalisations that deserve a proof attempt). The numbers are the answer to "how often is
+a false generalisation caught without a proof attempt, and how much of the library is within the probe's reach" (a candidate is out of reach when a remaining binder is not Nat, Int or Bool).
+
 unused-hyps (the HYPOTHESIS-DROPPING probe): for every theorem of the modules, the hypotheses (binders whose type is a proposition) that the PROOF NEVER USES. A hypothesis the proof term, the
 types of the other binders and the conclusion do not mention can be dropped with the same proof: the theorem is then stated more strongly than needed, and the generalised statement is a candidate
 (for tenro: deduplicated against `data/` by isnad shape, confirmed by full id). Nothing is searched and nothing is trusted: it reads the proof term. One line a finding:
@@ -77,7 +82,7 @@ def assignments (domains : Array (Array Expr)) (cap : Nat) : Array (Array Expr) 
 /-- the COUNTEREXAMPLE probe: the theorem's statement with the hypotheses at the binder indices `drop` removed, checked on all assignments of `Nat`/`Int`/`Bool` variables in a small range:
 a counterexample is an assignment that satisfies every remaining hypothesis and falsifies the conclusion. A candidate generalisation (a hypothesis dropped) that has one is rejected without a
 proof attempt. `none` is "no counterexample found", which proves nothing; a statement with a binder of another type is skipped. -/
-def counterexample (ci : ConstantInfo) (drop : List Nat) (bound : Nat) (cap : Nat) : MetaM (Option String) :=
+def counterexample (ci : ConstantInfo) (drop : List Nat) (bound : Nat) (cap : Nat) : MetaM (Option (Option String)) :=
   forallTelescope ci.type fun xs concl => do
     let mut vars : Array Expr := #[]
     let mut domains : Array (Array Expr) := #[]
@@ -109,8 +114,8 @@ def counterexample (ci : ConstantInfo) (drop : List Nat) (bound : Nat) (cap : Na
           let n ← v.fvarId!.getUserName
           pure (if n.hasMacroScopes then `_ else n)
         let shown ← vals.mapM fun v => do pure (toString (← ppExpr v))
-        return some (", ".intercalate ((names.zip shown).toList.map fun (n, v) => s!"{n}={v}"))
-    return none
+        return some (some (", ".intercalate ((names.zip shown).toList.map fun (n, v) => s!"{n}={v}")))
+    return some none
 
 /-- the findings, and how much the probe LOOKED AT (theorems read, propositional hypotheses read): a probe that found nothing in nothing proves nothing, and the verdict says so -/
 def probe (mods : List Name) : CoreM (Array String × Nat × Nat) := do
@@ -129,6 +134,40 @@ def probe (mods : List Name) : CoreM (Array String × Nat × Nat) := do
     for (i, hn, ty) in found do
       rows := rows.push (m.toString, n.toString, s!"unused\t{n}\t{m}\t{i}\t{hn}\t{ty.replace "\n" " "}")
   return ((rows.qsort fun a b => a.1 < b.1 || (a.1 == b.1 && a.2.1 < b.2.1)).map (·.2.2), theorems, hyps)
+
+/-- the COUNTEREXAMPLE probe over a library: every propositional hypothesis of every theorem dropped on its own (bound 3, at most 512 assignments each).
+Returns the rejected candidates as lines and the counts (theorems, candidates, out of reach, searched, rejected). -/
+def sweep (mods : List Name) : CoreM (Array String × Nat × Nat × Nat × Nat × Nat) := do
+  let env ← getEnv
+  let mut rows : Array (String × String × String) := #[]
+  let mut theorems := 0
+  let mut cands := 0
+  let mut oor := 0
+  let mut searched := 0
+  let mut rejected := 0
+  for (n, ci) in env.constants.toList do
+    let .thmInfo _ := ci | continue
+    let some idx := env.getModuleIdxFor? n | continue
+    let some m := env.header.moduleNames[idx.toNat]? | continue
+    if !mods.any (·.isPrefixOf m) || !okName n then continue
+    theorems := theorems + 1
+    let props ← (forallTelescope ci.type fun xs _ => do
+      let mut ps : Array Nat := #[]
+      for i in [0:xs.size] do
+        if (← isProp (← inferType xs[i]!)) then ps := ps.push i
+      return ps).run'
+    for i in props do
+      cands := cands + 1
+      match ← (counterexample ci [i] 3 512).run' with
+      | none => oor := oor + 1
+      | some none =>
+        searched := searched + 1
+        rows := rows.push (m.toString, n.toString, s!"open\t{n}\t{i}")
+      | some (some cx) =>
+        searched := searched + 1
+        rejected := rejected + 1
+        rows := rows.push (m.toString, n.toString, s!"rejected\t{n}\t{i}\t{cx}")
+  return ((rows.qsort fun a b => a.1 < b.1 || (a.1 == b.1 && a.2.1 < b.2.1)).map (·.2.2), theorems, cands, oor, searched, rejected)
 
 unsafe def main (args : List String) : IO UInt32 := do
   enableInitializersExecution
@@ -151,9 +190,18 @@ unsafe def main (args : List String) : IO UInt32 := do
     let some ci := env.find? thm.toName | IO.eprintln s!"{thm}: no such declaration"; return 2
     let (r, _) ← ((counterexample ci drop 3 4096).run').toIO ctx { env }
     match r with
-    | some cx => IO.println s!"counterexample\t{thm}\t{",".intercalate (drop.map toString)}\t{cx}"
-    | none => IO.println s!"none\t{thm}\t{",".intercalate (drop.map toString)}"
+    | some (some cx) => IO.println s!"counterexample\t{thm}\t{",".intercalate (drop.map toString)}\t{cx}"
+    | _ => IO.println s!"none\t{thm}\t{",".intercalate (drop.map toString)}"
+    return 0
+  | "cx-sweep" :: mods@(_ :: _) =>
+    initSearchPath (← findSysroot)
+    let env ← importModules (mods.toArray.map fun m => { module := m.toName }) {} (trustLevel := 0) (loadExts := true)
+    let ctx : Core.Context := { fileName := "<probe>", fileMap := default, maxHeartbeats := 0 }
+    let ((lines, th, cand, oor, searched, rej), _) ← (sweep (mods.map String.toName)).toIO ctx { env }
+    IO.println s!"examined\t{th}\t{cand}\t{oor}\t{searched}\t{rej}"
+    for l in lines do IO.println l
+    IO.eprintln s!"cx-sweep: {cand} candidate generalisations in {th} theorems: {oor} out of reach, {searched} searched, {rej} rejected"
     return 0
   | _ =>
-    IO.eprintln "usage: lake env lean --run Probes.lean unused-hyps <Module>... | counterexample <Module> <Theorem> [<index>,...]"
+    IO.eprintln "usage: lake env lean --run Probes.lean unused-hyps <Module>... | counterexample <Module> <Theorem> [<index>,...] | cx-sweep <Module>..."
     return 2

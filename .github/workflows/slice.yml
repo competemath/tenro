@@ -72,6 +72,14 @@ jobs:
           python3 "$GITHUB_WORKSPACE/tools/soundness/probe_findings.py" hypothesis-dropping < "$RUNNER_TEMP/probe.out" > "$RUNNER_TEMP/hd.json"
           python3 -c 'import json,sys; sys.path.insert(0, sys.argv[1]); import verdict; d = json.load(open(sys.argv[2])); r = verdict.check_findings(d, require_examined=True); print(d["examined"], r["status"]); sys.exit(r["status"] != "pass")' "$GITHUB_WORKSPACE/tools/soundness" "$RUNNER_TEMP/hd.json"
           test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["examined"]["theorems"])' "$RUNNER_TEMP/hd.json")" -ge 1000
+      - name: The counterexample sweep on the slice (how often a false generalisation is caught without a proof attempt)
+        working-directory: ${{ runner.temp }}/tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/soundness/Probes.lean" cx-sweep Init.Data.Nat > "$RUNNER_TEMP/sweep.out" 2> "$RUNNER_TEMP/sweep.err"
+          tail -1 "$RUNNER_TEMP/sweep.err"
+          read -r tag theorems cands oor searched rejected < <(head -1 "$RUNNER_TEMP/sweep.out" | tr '\t' ' ')
+          test "$tag" = examined && test "$theorems" -ge 1000 && test "$searched" -ge 500 && test "$rejected" -ge 1
+          echo "caught without a proof attempt: $rejected of $searched searched (of $cands candidates, $oor out of reach)"
       - name: Lemma and definition counts, and the structural duplicates, of the slice
         working-directory: ${{ runner.temp }}/tengoku
         run: |

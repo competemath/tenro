@@ -55,3 +55,11 @@ jobs:
           cat "$RUNNER_TEMP/cx.out"
           printf 'counterexample\tPr.cx_needs_hyp\t1\ta=0\nnone\tPr.cx_needs_hyp\t\ncounterexample\tPr.used_hyps\t2,3\ta=0, b=0\ncounterexample\tPr.used_hyps\t3\ta=0, b=2\nnone\tPr.unused_hyp\t2\nnone\tPr.cx_bool_int\t2\ncounterexample\tPr.one_of_two\t3\ta=0, b=1\nnone\tPr.dependent\t1\n' > "$RUNNER_TEMP/cx.want"
           diff "$RUNNER_TEMP/cx.want" "$RUNNER_TEMP/cx.out"
+      - name: The counterexample sweep over the fixture rejects exactly these candidates and leaves exactly these open
+        working-directory: tools/soundness/fixture
+        run: |
+          lake env lean --run ../Probes.lean cx-sweep Pr.Cases > "$RUNNER_TEMP/sweep.out"
+          test "$(head -1 "$RUNNER_TEMP/sweep.out")" = "$(printf 'examined\t9\t10\t2\t8\t5')"
+          tail -n +2 "$RUNNER_TEMP/sweep.out" | cut -f1-3 | sort > "$RUNNER_TEMP/sweep.got"
+          printf 'open\tPr.cx_bool_int\t2\nopen\tPr.unused_hyp\t2\nopen\tPr.unused_rec\t1\nrejected\tPr.cx_needs_hyp\t1\nrejected\tPr.one_of_two\t2\nrejected\tPr.one_of_two\t3\nrejected\tPr.used_hyps\t2\nrejected\tPr.used_hyps\t3\n' | sort > "$RUNNER_TEMP/sweep.want"
+          diff "$RUNNER_TEMP/sweep.want" "$RUNNER_TEMP/sweep.got"
