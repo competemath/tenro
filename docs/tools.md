@@ -26,7 +26,7 @@ Local development: a minimal Lean is enough for the fixtures (`lake build` in `t
 | Probe | Reads | Result |
 | --- | --- | --- |
 | `unused-hyps` (hypothesis dropping) | the proof term | 754 propositional hypotheses read, **0 unused** (the verdict refuses a probe that reports a count of 0 theorems) |
-| `cx-sweep` (counterexample, one hypothesis dropped at a time, values 0..3, at most 512 assignments) | the statement only | 801 candidate generalisations: **70 out of reach** (a binder that is not `Nat`, `Int` or `Bool`), 731 searched, **698 rejected (95.5% of those searched) without a proof attempt**, 33 left open |
+| `cx-sweep` (counterexample, one hypothesis dropped at a time, values 0..3, at most 512 assignments) | the statement only | 801 candidate generalisations: **70 out of reach** (a binder that is not `Nat`, `Int` or `Bool`), 731 searched, **698 rejected (95.5% of those searched) without a proof attempt**, **16 undecided** (the conclusion was never decidable by evaluation), **17 open with evidence** (the conclusion was decided on at least 2 assignments and held on all: 13 on more than 10) |
 
-The 33 that stay open are the generalisations worth a proof attempt, but the number is an upper bound on them: a conclusion the probe cannot evaluate (an existential, for instance) is never refuted, so
-`exists_eq_add_one_of_ne_zero` with its hypothesis dropped is among them although it is false at `n = 0`. A sharper count needs the number of assignments on which the conclusion was decided; it is the next thing to add.
+The 17 that stay open WITH evidence are the generalisations worth a proof attempt first. The 16 undecided have no evidence either way: a conclusion the probe cannot evaluate (an existential, for instance) is never refuted, so
+`exists_eq_add_one_of_ne_zero` with its hypothesis dropped is among them although it is false at `n = 0`; the sweep says so (`undecided`) instead of counting it as support. The earlier count of 33 open mixed the two.

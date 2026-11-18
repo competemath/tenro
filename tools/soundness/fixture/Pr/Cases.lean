@@ -30,4 +30,7 @@ theorem cx_needs_hyp (a : Nat) (h : 0 < a) : a ≠ 0 := by omega
 /-- over Bool and Int as well; dropping `h` gives a statement that is still true -/
 theorem cx_bool_int (b : Bool) (n : Int) (h : n = n) : (b && true) = b := by simp
 
+/-- the conclusion is an existential: evaluation cannot decide it, so the sweep can neither refute nor support dropping `h` (it is false at n = 0) -/
+theorem cx_exists (n : Nat) (h : n ≠ 0) : ∃ k, n = k + 1 := ⟨n - 1, by omega⟩
+
 end Pr
