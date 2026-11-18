@@ -1,0 +1,20 @@
+{
+ "library": "tauceti",
+ "old": "tengoku c9feeb46e (the intake, part 15 of 15, 2026-10-13)",
+ "new": "tengoku ba5eaf374 (roots: Tauceti qualified with Tengoku.Tauceti., 2026-11-13)",
+ "manifest": "data/intake/tauceti/manifest.jsonl",
+ "tool": "tools/lens/reseed.py classify",
+ "summary": {
+  "old": 35358,
+  "new": 35358,
+  "unchanged": 35097,
+  "moved": 0,
+  "restated": 0,
+  "renamed": 261,
+  "removed": 0,
+  "added": 0,
+  "survival": 1.0,
+  "fidelity": 1.0
+ },
+ "note": "a rename-only migration: the roots class qualified the 261 names that collided with the root namespace; every statement is otherwise the same"
+}
