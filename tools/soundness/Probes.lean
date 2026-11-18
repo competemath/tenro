@@ -13,6 +13,8 @@ types of the other binders and the conclusion do not mention can be dropped with
 
   unused<TAB><theorem><TAB><module><TAB><binder index from 0><TAB><binder name><TAB><binder type>
 
+and first one line `examined<TAB><theorems read><TAB><propositional hypotheses read>`, so that "no findings" can be told from "nothing looked at".
+
 Theorems Lean generates or names internally (`_`, `eq_`, `proof_`, `match_`, `sizeOf_`) are not read.
 -/
 import Lean
@@ -23,15 +25,17 @@ def okName (n : Name) : Bool :=
     (let s := n.getString!; !(s.startsWith "eq_" || s.startsWith "proof_" || s.startsWith "match_" || s.startsWith "sizeOf_" || s == "injEq"))
 
 /-- the unused hypotheses of one theorem: (index among all the lambda binders, name, printed type) -/
-def unusedHyps (ci : ConstantInfo) : MetaM (Array (Nat × Name × String)) := do
-  let some value := (match ci with | .thmInfo t => some t.value | _ => none) | return #[]
+def unusedHyps (ci : ConstantInfo) : MetaM (Array (Nat × Name × String) × Nat) := do
+  let some value := (match ci with | .thmInfo t => some t.value | _ => none) | return (#[], 0)
   lambdaTelescope value fun xs body => do
     let mut out : Array (Nat × Name × String) := #[]
+    let mut props := 0
     let concl ← inferType body
     for h : i in [0:xs.size] do
       let x := xs[i]
       let ty ← inferType x
       unless (← isProp ty) do continue
+      props := props + 1
       let id := x.fvarId!
       if body.containsFVar id || concl.containsFVar id then continue
       -- another binder's type may depend on it (a hypothesis about a proof): then it is not droppable
@@ -41,7 +45,7 @@ def unusedHyps (ci : ConstantInfo) : MetaM (Array (Nat × Name × String)) := do
       if dependedOn then continue
       let un ← x.fvarId!.getUserName
       out := out.push (i, (if un.hasMacroScopes then `_ else un), toString (← ppExpr ty))
-    return out
+    return (out, props)
 
 /-- is the proposition true? `none` when it cannot be decided by evaluation (no instance, a stuck term) -/
 def decideProp (p : Expr) : MetaM (Option Bool) := do
@@ -108,17 +112,23 @@ def counterexample (ci : ConstantInfo) (drop : List Nat) (bound : Nat) (cap : Na
         return some (", ".intercalate ((names.zip shown).toList.map fun (n, v) => s!"{n}={v}"))
     return none
 
-def probe (mods : List Name) : CoreM (Array String) := do
+/-- the findings, and how much the probe LOOKED AT (theorems read, propositional hypotheses read): a probe that found nothing in nothing proves nothing, and the verdict says so -/
+def probe (mods : List Name) : CoreM (Array String × Nat × Nat) := do
   let env ← getEnv
   let mut rows : Array (String × String × String) := #[]
+  let mut theorems := 0
+  let mut hyps := 0
   for (n, ci) in env.constants.toList do
     let .thmInfo _ := ci | continue
     let some idx := env.getModuleIdxFor? n | continue
     let some m := env.header.moduleNames[idx.toNat]? | continue
     if !mods.any (·.isPrefixOf m) || !okName n then continue
-    for (i, hn, ty) in (← (unusedHyps ci).run') do
+    let (found, props) ← (unusedHyps ci).run'
+    theorems := theorems + 1
+    hyps := hyps + props
+    for (i, hn, ty) in found do
       rows := rows.push (m.toString, n.toString, s!"unused\t{n}\t{m}\t{i}\t{hn}\t{ty.replace "\n" " "}")
-  return (rows.qsort fun a b => a.1 < b.1 || (a.1 == b.1 && a.2.1 < b.2.1)).map (·.2.2)
+  return ((rows.qsort fun a b => a.1 < b.1 || (a.1 == b.1 && a.2.1 < b.2.1)).map (·.2.2), theorems, hyps)
 
 unsafe def main (args : List String) : IO UInt32 := do
   enableInitializersExecution
@@ -127,9 +137,10 @@ unsafe def main (args : List String) : IO UInt32 := do
     initSearchPath (← findSysroot)
     let env ← importModules (mods.toArray.map fun m => { module := m.toName }) {} (trustLevel := 0) (loadExts := true)
     let ctx : Core.Context := { fileName := "<probe>", fileMap := default, maxHeartbeats := 0 }
-    let (lines, _) ← (probe (mods.map String.toName)).toIO ctx { env }
+    let ((lines, theorems, hyps), _) ← (probe (mods.map String.toName)).toIO ctx { env }
+    IO.println s!"examined\t{theorems}\t{hyps}"
     for l in lines do IO.println l
-    IO.eprintln s!"probe: {lines.size} unused hypotheses"
+    IO.eprintln s!"probe: {lines.size} unused hypotheses among {hyps} in {theorems} theorems"
     return 0
   | "counterexample" :: mod :: thm :: rest =>
     -- Probes.lean counterexample <Module> <Theorem> [<index>,<index>...]: the theorem with the hypotheses at those binder indices dropped
