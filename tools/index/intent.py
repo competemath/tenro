@@ -4,7 +4,7 @@
   intent.py build --docs DOCS.tsv --isnad ISNAD.tsv --isnad-py TENGOKU/scripts/isnad.py --out DIR
   intent.py search DIR "the first list is a prefix of the second" [-k 10]
 
-DOCS.tsv is the output of `tools/index/Docs.lean` (`doc<TAB>name<TAB>module<TAB>escaped text`); ISNAD.tsv that of `tengoku-isnad`. A docstring belongs to the STATEMENT its theorem states (the isnad id),
+DOCS.tsv is the output of `tools/index/Docs.lean` (`doc<TAB>name<TAB>module<TAB>thm|def<TAB>escaped text`); ISNAD.tsv that of `tengoku-isnad`. A docstring belongs to the STATEMENT its theorem states (the isnad id),
 so two theorems that state the same thing share one document, and the index never needs a name. Output, deterministic (sorted, one JSON object a line):
 
   intent.jsonl   {"token", "df", "postings": [[doc position, term frequency], ...]}   an inverted index
@@ -12,8 +12,8 @@ so two theorems that state the same thing share one document, and the index neve
   intent-stats.json   counts, docs whose theorem has no id in the input, and the sha256 of each file
 
 NAME-BLIND by construction, not by promise: the text is reduced to plain words; inline code (`like this`) and code blocks are DROPPED, because that is where a docstring spells out declaration names
-and formulas, so what is indexed is the prose and no identifier. A test checks that no declared name occurs in the output. The cost is stated: a docstring that says everything inside code spans
-is indexed by nothing, and a query is words, not formulas (the shape index is the formula-side search).
+and formulas, so what is indexed is the prose and no identifier. A test checks that no declared name occurs in the output. The costs are stated: a docstring that says everything inside code spans
+is indexed by nothing; and the documents are STATEMENTS, so the docstring of a definition (which states nothing and has no statement id) is counted (`definitions_not_indexed`) and not indexed, and a query is words, not formulas (the shape index is the formula-side search).
 
 Ranking is BM25 (k1 = 1.2, b = 0.75), computed from the index alone, so a search over the released index needs nothing else.
 """
@@ -136,13 +136,17 @@ def search(idx: dict[str, list[list[int]]], docs: list[dict], query: str, k: int
     return [(docs[pos]["id"], round(s, 6)) for pos, s in ranked[:k]]
 
 
-def read_docs(path: Path) -> list[tuple[str, str]]:
-    out = []
+def read_docs(path: Path) -> tuple[list[tuple[str, str]], int]:
+    """(the docstrings of theorems as (name, text), the number of definitions' docstrings left out: they state nothing and have no statement id)"""
+    out, defs = [], 0
     for ln in path.read_text(encoding="utf-8").splitlines():
         cols = ln.split("\t")
-        if len(cols) >= 4 and cols[0] == "doc":
-            out.append((cols[1], unescape("\t".join(cols[3:]))))
-    return out
+        if len(cols) >= 5 and cols[0] == "doc":
+            if cols[3] == "thm":
+                out.append((cols[1], unescape("\t".join(cols[4:]))))
+            else:
+                defs += 1
+    return out, defs
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -165,7 +169,10 @@ def main(argv: list[str] | None = None) -> int:
             if ln.startswith("isnad1\t"):
                 r = mod.Record(ln)
                 id_of[r.name] = r.id
-        print(json.dumps(write(a.out, build(read_docs(a.docs), id_of)), sort_keys=True, indent=1))
+        docs, defs = read_docs(a.docs)
+        built = build(docs, id_of)
+        built["stats"]["definitions_not_indexed"] = defs
+        print(json.dumps(write(a.out, built), sort_keys=True, indent=1))
         return 0
     idx, docs = load(a.dir)
     for ident, sc in search(idx, docs, a.query, a.k):

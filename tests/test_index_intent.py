@@ -112,10 +112,12 @@ class Cli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             (d / "docs.tsv").write_text(
-                "doc\tA\tM\tThe list is empty.\\nIt has no elements.\nnoise\ndoc\tB\tM\tZero is a number.\n", encoding="utf-8"
+                "doc\tA\tM\tthm\tThe list is empty.\\nIt has no elements.\nnoise\ndoc\tB\tM\tthm\tZero is a number.\ndoc\tD\tM\tdef\tA definition.\n",
+                encoding="utf-8",
             )
-            docs = intent.read_docs(d / "docs.tsv")
+            docs, defs = intent.read_docs(d / "docs.tsv")
             self.assertEqual(docs, [("A", "The list is empty.\nIt has no elements."), ("B", "Zero is a number.")])
+            self.assertEqual(defs, 1)
             intent.write(d / "out", intent.build(docs, {"A": "idA", "B": "idB"}))
             self.assertEqual(intent.main(["search", str(d / "out"), "empty list", "-k", "1"]), 0)
             stats = json.loads((d / "out" / "intent-stats.json").read_text(encoding="utf-8"))

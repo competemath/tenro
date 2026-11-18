@@ -3,7 +3,7 @@ The docstrings of a library: the raw material of the `intent` index (tools/index
 
   lake env lean --run Docs.lean <Module>...     (from the Lake project that holds the modules; prefix match, like DataStats.lean)
 
-One line per documented theorem or definition whose name is the author's: `doc<TAB>name<TAB>module<TAB>doc text`, the text with `\` written `\\`, a tab `\t` and a line break `\n`
+One line per documented theorem or definition whose name is the author's: `doc<TAB>name<TAB>module<TAB>kind<TAB>doc text` (kind `thm` or `def`), the text with `\` written `\\`, a tab `\t` and a line break `\n`
 so that a line is one record. Only what the author wrote is read: no auxiliary, internal or generated declaration (the same filter as DataStats.lean), and nothing is computed from a proof.
 -/
 import Lean
@@ -36,7 +36,7 @@ unsafe def main (args : List String) : IO UInt32 := do
     if !mods.any (·.isPrefixOf m) || !okName n then continue
     unless ci.isTheorem || ci.isDefinition do continue
     let some doc ← findDocString? env n (includeBuiltin := false) | continue
-    rows := rows.push (n.toString, m.toString, escape doc)
+    rows := rows.push (n.toString, m.toString, (if ci.isTheorem then "thm" else "def") ++ "\t" ++ escape doc)
   for (n, m, d) in rows.qsort (fun a b => a.1 < b.1) do
     IO.println s!"doc\t{n}\t{m}\t{d}"
   IO.eprintln s!"docs: {rows.size} documented declarations"
