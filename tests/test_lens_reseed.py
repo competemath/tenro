@@ -45,6 +45,31 @@ class Classify(unittest.TestCase):
         self.assertEqual((s["renamed"], s["removed"], s["added"]), (0, 2, 2))
         self.assertEqual({c["change"] for c in changes}, {"removed"})
 
+    def test_a_shared_statement_is_matched_within_a_module_when_that_is_unambiguous(self):
+        old = [row("p", "theorem p : True", "M1"), row("q", "theorem q : True", "M2")]
+        new = [row("r", "theorem r : True", "M1"), row("s", "theorem s : True", "M2")]
+        s, changes = reseed.classify(old, new)
+        self.assertEqual((s["renamed"], s["removed"], s["added"]), (2, 0, 0))
+        self.assertEqual({c["old"]: c["new"] for c in changes}, {"p": "r", "q": "s"})
+
+    def test_two_in_one_module_with_one_statement_stay_ambiguous(self):
+        old = [row("p", "theorem p : True", "M1"), row("q", "theorem q : True", "M1")]
+        new = [row("r", "theorem r : True", "M1"), row("s", "theorem s : True", "M1")]
+        s, _ = reseed.classify(old, new)
+        self.assertEqual((s["renamed"], s["removed"]), (0, 2))
+
+    def test_a_qualification_is_a_rename_even_when_the_name_occurs_in_the_statement(self):
+        """the roots class turns `foo` into `Ns.foo` in the declaration and in every statement that mentions it; the statements are equal once the new name is read as the old one"""
+        old = [row("foo", "theorem foo (n : Nat) : foo_aux n = n", "M1"), row("bar", "theorem bar (n : Nat) : foo n = n", "M1")]
+        new = [
+            row("Ns.foo", "theorem Ns.foo (n : Nat) : foo_aux n = n", "M1"),
+            row("Ns.bar", "theorem Ns.bar (n : Nat) : Ns.foo n = n", "M1"),
+        ]
+        s, changes = reseed.classify(old, new)
+        # `foo` matches by (module, last component) and an equal statement; `bar` mentions the new name of `foo`, so it is NOT the same text: it stays a removal and an addition (never a guess)
+        self.assertEqual({c["old"]: c["new"] for c in changes if c["change"] == "renamed"}, {"foo": "Ns.foo"})
+        self.assertEqual((s["renamed"], s["removed"], s["added"]), (1, 1, 1))
+
     def test_two_olds_one_new_is_also_not_a_rename(self):
         old = [row("p", "theorem p : True"), row("q", "theorem q : True")]
         new = [row("r", "theorem r : True")]

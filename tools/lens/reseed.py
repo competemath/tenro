@@ -8,7 +8,8 @@ OLD and NEW are Tengoku's `data/intake/<library>/manifest.jsonl` at two commits 
   unchanged   same name, same statement, same module
   moved       same name, same statement, another module
   restated    same name, another statement (a lens entry is needed: the statement id changes)
-  renamed     the name is gone and exactly one theorem of the new manifest that was not in the old one has the same statement once the declared name is removed
+  renamed     the name is gone and exactly one theorem of the new manifest that was not in the old one has the same statement once the declared name is removed (or, when several share the statement,
+              exactly one in the same module)
   removed     the name is gone and no such theorem exists (a theorem that cannot be placed in one class is `removed` plus an `added`: the record never guesses)
 
 `added` counts the new theorems no old one maps to. The two numbers a migration is judged by are kept apart, because they answer different questions:
@@ -41,6 +42,13 @@ def statement_id(statement: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()[:16]
 
 
+def _same_up_to_qualification(old: dict, new: dict, old_name: str, new_name: str) -> bool:
+    """the two statements are the same once the new name is read as the old one wherever it occurs in the declaration"""
+    a = re.sub(r"\s+", " ", old["statement"]).strip()
+    b = re.sub(r"\s+", " ", new["statement"]).strip().replace(new_name, old_name, 1)
+    return a == b
+
+
 def classify(old: list[dict], new: list[dict]) -> tuple[dict, list[dict]]:
     o = {x["name"]: x for x in old}
     n = {x["name"]: x for x in new}
@@ -61,6 +69,34 @@ def classify(old: list[dict], new: list[dict]) -> tuple[dict, list[dict]]:
         news = new_by_id.get(sid, [])
         if len(olds) == 1 and len(news) == 1:
             renamed_to[olds[0]] = news[0]
+    # a statement shared by several theorems of the library cannot be matched by statement alone; within ONE module it often can (a rename keeps the module): exactly one gone and one new
+    # theorem with that statement in that module is still a rename, and anything less clear stays a removal plus an addition
+    old_by_mod: dict[tuple[str, str], list[str]] = {}
+    new_by_mod: dict[tuple[str, str], list[str]] = {}
+    for name in gone:
+        if name not in renamed_to:
+            old_by_mod.setdefault((o[name]["module"], statement_id(o[name]["statement"])), []).append(name)
+    taken = set(renamed_to.values())
+    for name in new_only:
+        if name not in taken:
+            new_by_mod.setdefault((n[name]["module"], statement_id(n[name]["statement"])), []).append(name)
+    for key, olds in old_by_mod.items():
+        news = new_by_mod.get(key, [])
+        if len(olds) == 1 and len(news) == 1:
+            renamed_to[olds[0]] = news[0]
+    # a qualification (`foo` became `Ns.foo`) keeps the last component of the name and the module, and changes the statement only where the name occurs in it: match on those two, and ask that the
+    # statements agree once the old name's qualified form is read as the old name (a statement that really changed is `restated`, not a rename)
+    unresolved_old = [name for name in gone if name not in renamed_to]
+    taken = set(renamed_to.values())
+    new_by_last: dict[tuple[str, str], list[str]] = {}
+    for name in new_only:
+        if name not in taken:
+            new_by_last.setdefault((n[name]["module"], name.rsplit(".", 1)[-1]), []).append(name)
+    for name in unresolved_old:
+        cands = new_by_last.get((o[name]["module"], name.rsplit(".", 1)[-1]), [])
+        if len(cands) == 1 and _same_up_to_qualification(o[name], n[cands[0]], name, cands[0]):
+            renamed_to[name] = cands[0]
+            new_by_last[(o[name]["module"], name.rsplit(".", 1)[-1])] = []
     for name, x in o.items():
         if name in n:
             y = n[name]
