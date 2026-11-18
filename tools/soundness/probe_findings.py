@@ -13,6 +13,15 @@ import json
 import sys
 
 
+def examined(lines) -> dict | None:
+    """what the probe LOOKED AT: the `examined<TAB>theorems<TAB>hypotheses` line, None if the probe did not say"""
+    for ln in lines:
+        parts = ln.rstrip("\n").split("\t")
+        if parts[0] == "examined" and len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+            return {"theorems": int(parts[1]), "hypotheses": int(parts[2])}
+    return None
+
+
 def findings(lines) -> list[str]:
     out = []
     for ln in lines:
@@ -29,7 +38,8 @@ def main(argv: list[str] | None = None) -> int:
     if argv != ["hypothesis-dropping"]:
         print(__doc__)
         return 2
-    print(json.dumps({"findings": findings(sys.stdin)}, indent=1))
+    lines = list(sys.stdin)
+    print(json.dumps({"findings": findings(lines), "examined": examined(lines)}, indent=1))
     return 0
 
 

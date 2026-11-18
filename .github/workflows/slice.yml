@@ -64,6 +64,14 @@ jobs:
           diff -r "$RUNNER_TEMP/intent1" "$RUNNER_TEMP/intent2" && echo "reproducible: the two intent builds are byte-identical"
           test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["documents"])' "$RUNNER_TEMP/intent1/intent-stats.json")" -ge 20
           python3 "$GITHUB_WORKSPACE/tools/index/intent.py" search "$RUNNER_TEMP/intent1" "division with remainder of natural numbers" -k 5
+      - name: The hypothesis-dropping probe on the slice (what it looked at, what it found), and the verdict's rule for it
+        working-directory: ${{ runner.temp }}/tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/soundness/Probes.lean" unused-hyps Init.Data.Nat > "$RUNNER_TEMP/probe.out" 2> "$RUNNER_TEMP/probe.err"
+          tail -1 "$RUNNER_TEMP/probe.err"
+          python3 "$GITHUB_WORKSPACE/tools/soundness/probe_findings.py" hypothesis-dropping < "$RUNNER_TEMP/probe.out" > "$RUNNER_TEMP/hd.json"
+          python3 -c 'import json,sys; sys.path.insert(0, sys.argv[1]); import verdict; d = json.load(open(sys.argv[2])); r = verdict.check_findings(d, require_examined=True); print(d["examined"], r["status"]); sys.exit(r["status"] != "pass")' "$GITHUB_WORKSPACE/tools/soundness" "$RUNNER_TEMP/hd.json"
+          test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["examined"]["theorems"])' "$RUNNER_TEMP/hd.json")" -ge 1000
       - name: Lemma and definition counts, and the structural duplicates, of the slice
         working-directory: ${{ runner.temp }}/tengoku
         run: |

@@ -11,7 +11,7 @@ It runs nothing. It reads what the checks wrote and decides, with one rule above
                   kernel-checked one (invariant I1).
   vacuity         Tengoku's `tools/vacuity/vacuity.lean` output: every `VACUOUS <theorem> ...` line needs the theorem's name in the acknowledgement list (`--ack`, a JSON list).
   clean-rebuild   `passed` only when the caller says the whole tree built from nothing (no cache) with warnings as errors.
-  probes          `--probe hypothesis-dropping=FILE`, `--probe counterexample=FILE`: JSON `{"findings": [...]}`; any finding fails. The probes themselves are Lean runs of the harness.
+  probes          `--probe hypothesis-dropping=FILE`, `--probe counterexample=FILE`: JSON `{"findings": [...]}`; any finding fails. The hypothesis-dropping file must also carry `"examined": {"theorems": n, ...}` with n > 0: a probe that looked at nothing has not passed. The probes themselves are Lean runs of the harness.
 
 `--require` names the checks that must be present (default: axioms, vacuity, clean-rebuild, hypothesis-dropping, counterexample). The exit status is 1 when the verdict is not `passed`.
 """
@@ -45,10 +45,19 @@ def check_vacuity(text: str, acks: set[str]) -> dict:
     return {"status": "fail" if loose else "pass", "details": [f"{n}: hypotheses that can never all hold, not acknowledged" for n in loose]}
 
 
-def check_findings(doc: dict) -> dict:
+def check_findings(doc: dict, require_examined: bool = False) -> dict:
     findings = doc.get("findings")
     if not isinstance(findings, list):
         return {"status": "fail", "details": ['the file has no "findings" list']}
+    if require_examined:
+        ex = doc.get("examined")
+        if not isinstance(ex, dict) or not isinstance(ex.get("theorems"), int):
+            return {
+                "status": "fail",
+                "details": ["the probe did not say how much it looked at (no `examined` count): no findings in nothing proves nothing"],
+            }
+        if ex["theorems"] == 0:
+            return {"status": "fail", "details": ["the probe looked at 0 theorems: no findings in nothing proves nothing"]}
     return {"status": "fail" if findings else "pass", "details": [str(f)[:200] for f in findings[:50]]}
 
 
@@ -88,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
         checks["clean-rebuild"] = {"status": "pass" if ok else "fail", "details": [] if ok else ["the clean rebuild failed"]}
     for spec in a.probe:
         name, _, file = spec.partition("=")
-        checks[name] = check_findings(read_json(Path(file)))
+        checks[name] = check_findings(read_json(Path(file)), require_examined=(name == "hypothesis-dropping"))
     verdict = decide(checks, tuple(a.require))
     print(json.dumps(verdict, indent=1, sort_keys=True))
     return 0 if verdict["passed"] else 1

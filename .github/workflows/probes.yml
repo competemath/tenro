@@ -32,7 +32,9 @@ jobs:
           lake env lean --run ../Probes.lean unused-hyps Pr.Cases | tee "$RUNNER_TEMP/probe.out"
       - name: Exactly the hypotheses the proofs never use
         run: |
-          cut -f2,4 "$RUNNER_TEMP/probe.out" | sort > "$RUNNER_TEMP/got.txt"
+          # it says what it looked at: the nine theorems of the fixture and their eleven propositional hypotheses
+          test "$(head -1 "$RUNNER_TEMP/probe.out")" = "$(printf 'examined\t9\t11')"
+          grep '^unused' "$RUNNER_TEMP/probe.out" | cut -f2,4 | sort > "$RUNNER_TEMP/got.txt"
           printf 'Pr.cx_bool_int\t2\nPr.dependent\t1\nPr.dependent\t2\nPr.unused_hyp\t2\n' | sort > "$RUNNER_TEMP/want.txt"
           diff "$RUNNER_TEMP/want.txt" "$RUNNER_TEMP/got.txt"
           python3 tools/soundness/probe_findings.py hypothesis-dropping < "$RUNNER_TEMP/probe.out" | head -12

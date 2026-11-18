@@ -41,6 +41,20 @@ class OtherChecksTest(unittest.TestCase):
         self.assertEqual(v.check_findings({"findings": ["A.t holds without hypothesis h"]})["status"], "fail")
         self.assertEqual(v.check_findings({"nothing": 1})["status"], "fail")
 
+    def test_a_probe_that_looked_at_nothing_has_not_passed(self):
+        ok = {"findings": [], "examined": {"theorems": 1432, "hypotheses": 754}}
+        self.assertEqual(v.check_findings(ok, require_examined=True)["status"], "pass")
+        self.assertEqual(
+            v.check_findings({"findings": [], "examined": {"theorems": 0, "hypotheses": 0}}, require_examined=True)["status"], "fail"
+        )
+        self.assertEqual(v.check_findings({"findings": []}, require_examined=True)["status"], "fail")
+        self.assertEqual(v.check_findings({"findings": [], "examined": None}, require_examined=True)["status"], "fail")
+        self.assertEqual(
+            v.check_findings({"findings": ["x"], "examined": {"theorems": 5, "hypotheses": 1}}, require_examined=True)["status"], "fail"
+        )
+        # the counterexample probe is one candidate at a time and is not asked for a count
+        self.assertEqual(v.check_findings({"findings": []})["status"], "pass")
+
 
 class DecideTest(unittest.TestCase):
     PASS = {"status": "pass", "details": []}
