@@ -35,6 +35,10 @@ jobs:
           python3 ../tools/perf/perf_profile.py scale --sizes 0,200,800 --runs 5 > "$RUNNER_TEMP/measured/scale.json"
       - name: The tamper checker on its mutation corpus (the checker's own measure; real harness runs add to it)
         run: python3 tools/harness/tamper.py selftest --out "$RUNNER_TEMP/measured/tamper.json"
+      - name: The real re-cuts classified so far (docs/migration-corpus)
+        run: |
+          mkdir -p "$RUNNER_TEMP/measured/migration-corpus"
+          cp docs/migration-corpus/*.json "$RUNNER_TEMP/measured/migration-corpus/"
       - name: The report
         run: |
           python3 tools/readiness/gather.py "$RUNNER_TEMP/measured" --budget perf-budget.toml > "$RUNNER_TEMP/inputs.json"

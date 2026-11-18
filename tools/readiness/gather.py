@@ -10,6 +10,7 @@ Known files in DIR (each optional; a missing file is a missing measurement, neve
   lens-report.json        tools/lens/lens.py check               -> migration (and migration_integrity_violations from its "integrity_violations" if present)
   retrieval.json, obfuscation.json, tamper.json, harness.json, validity.json, campaign.json  -> the keys of the same name (the owner's eval runs)
   mathlib-load.json       {"net_median_s": ...}                  -> mathlib_load_net_median_s (context)
+  migration-corpus/*.json one file per real re-cut (docs/migration-corpus/*.json, written by tools/lens/reseed.py) -> migration_corpus, a list of {library, old, survival, fidelity}
 """
 
 from __future__ import annotations
@@ -34,6 +35,13 @@ def gather(directory: Path, budget: Path | None = None) -> dict:
             out[key] = json.loads(f.read_text(encoding="utf-8"))
     if "migration" in out and "integrity_violations" in out["migration"]:
         out["migration_integrity_violations"] = out["migration"]["integrity_violations"]
+    corpus = []
+    for f in sorted((directory / "migration-corpus").glob("*.json")):
+        doc = json.loads(f.read_text(encoding="utf-8"))
+        s = doc["summary"]
+        corpus.append({"library": doc["library"], "old": s["old"], "survival": s["survival"], "fidelity": s["fidelity"]})
+    if corpus:
+        out["migration_corpus"] = corpus
     m = directory / "mathlib-load.json"
     if m.is_file():
         out["mathlib_load_net_median_s"] = json.loads(m.read_text(encoding="utf-8"))["net_median_s"]

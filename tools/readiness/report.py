@@ -13,6 +13,7 @@ INPUTS.json (every key optional):
   retrieval        {"recall_at_10", "n"}                  blind signature recall on held-out goals with target names stripped
   obfuscation      {"pass_rate_plain", "pass_rate_scrambled", "n"}
   migration        tools/lens/lens.py `check` report ({"denominator", "accepted", "rate", "rejected"}) and migration_integrity_violations: int
+  migration_corpus [{"library", "old", "survival", "fidelity"}, ...]   tools/lens/reseed.py classify, one per real re-cut (docs/migration-corpus/)
   tamper           {"cases", "undetected"}                                   frozen-prefix / `#print axioms` tamper tests
   harness          {"runs", "infra_errors"}; validity: {"tasks", "two_sided_valid"}
   campaign         {"arms": {name: {"model", "turn_cap", "sample_budget"}}, "strata": [...]}
@@ -112,6 +113,29 @@ def gate3(i: dict) -> list[dict]:
         out.append(crit("automatic bidirectional lens migration pass rate", ">= 0.98", None, None, "no migrations measured"))
     v = i.get("migration_integrity_violations")
     out.append(crit("isnad meaning integrity of accepted migrations", "100%", v, None if v is None else v == 0))
+    corpus = i.get("migration_corpus")
+    if corpus:
+        worst = min(c["fidelity"] for c in corpus)
+        per = "; ".join(f"{c['library']}: survival {c['survival']:.2%}, fidelity {c['fidelity']:.2%} of {c['old']}" for c in corpus)
+        out.append(
+            crit(
+                "fidelity of the survivors of real re-cuts (the gate's 98% read as fidelity, with survival reported beside it)",
+                ">= 0.98",
+                worst,
+                worst >= 0.98,
+                per + " (docs/migration-corpus.md: this reading is the owner's to accept)",
+            )
+        )
+    else:
+        out.append(
+            crit(
+                "fidelity of the survivors of real re-cuts (the gate's 98% read as fidelity, with survival reported beside it)",
+                ">= 0.98",
+                None,
+                None,
+                "no re-cut classified",
+            )
+        )
     return out
 
 
@@ -190,6 +214,29 @@ def report(inputs: dict) -> dict:
     return {"all_pass": all(g["status"] == "pass" for g in gates), "ab_allowed": all(g["status"] == "pass" for g in gates), "gates": gates}
 
 
+# where the measurement of a criterion comes from (matched on the criterion's name): what a person has to produce for an unmeasured one
+SOURCES = (
+    ("axiom, vacuity", "verdict.json: tools/soundness/verdict.py, fed by Tengoku's axiom_scan and vacuity checks, a clean rebuild, and the two probes (Probes.lean)"),
+    ("lemma-to-definition", "data-stats.json: tools/readiness/data_stats.py over a library's `data/` (no `data/` in Tengai yet)"),
+    ("structural duplicates", "data-stats.json: the same, from the isnad ids"),
+    ("cold import", "load.json and scale.json: tools/perf/perf_profile.py (readiness.yml measures them)"),
+    ("Recall@10", "retrieval.json: an owner's eval run on the held-out set (tenro-eval)"),
+    ("scrambled", "obfuscation.json: an owner's eval run, identifiers scrambled by tools/scramble"),
+    ("pass rate", "lens-report.json: tools/lens/lens.py check on a migration with isnad ids from built trees"),
+    ("isnad meaning integrity", "lens-report.json with `integrity_violations`: the isnad round trip on built trees"),
+    ("fidelity of the survivors", "migration-corpus/*.json: tools/lens/reseed.py classify on two manifests of a re-cut (docs/migration-corpus/)"),
+    ("tampering", "tamper.json: tools/harness/tamper.py (selftest in readiness.yml; real runs are the owner's)"),
+    ("infrastructure error", "harness.json: an owner's eval run"),
+    ("two-sided validity", "validity.json: an owner's eval run"),
+    ("strata", "campaign.json: the registered campaign"),
+    ("identical model", "campaign.json: the registered campaign"),
+)  # fmt: skip
+
+
+def source_of(criterion: str) -> str:
+    return next((s for key, s in SOURCES if key in criterion), "")
+
+
 def markdown(rep: dict) -> str:
     out = [f"# Readiness: A/B against Mathlib is {'ALLOWED' if rep['ab_allowed'] else 'NOT allowed'}", ""]
     for g in rep["gates"]:
@@ -198,6 +245,11 @@ def markdown(rep: dict) -> str:
             out.append(
                 f"- [{c['status']}] {c['criterion']} (threshold {c['threshold']}; value {c['value']}){' — ' + c['note'] if c['note'] else ''}"
             )
+        out.append("")
+    missing = [(g["gate"], c["criterion"]) for g in rep["gates"] for c in g["criteria"] if c["status"] == "unmeasured"]
+    if missing:
+        out += ["## Not measured yet, and where it comes from", ""]
+        out += [f"- gate {n}: {name} <- {source_of(name) or 'no source named'}" for n, name in missing]
         out.append("")
     return "\n".join(out)
 
