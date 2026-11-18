@@ -55,7 +55,7 @@ jobs:
           cat "$RUNNER_TEMP/cx.out"
           printf 'counterexample\tPr.cx_needs_hyp\t1\ta=0\nnone\tPr.cx_needs_hyp\t\ncounterexample\tPr.used_hyps\t2,3\ta=0, b=0\ncounterexample\tPr.used_hyps\t3\ta=0, b=2\nnone\tPr.unused_hyp\t2\nnone\tPr.cx_bool_int\t2\ncounterexample\tPr.one_of_two\t3\ta=0, b=1\nnone\tPr.dependent\t1\n' > "$RUNNER_TEMP/cx.want"
           diff "$RUNNER_TEMP/cx.want" "$RUNNER_TEMP/cx.out"
-      - name: The counterexample sweep over the fixture: exactly these candidates are rejected, these stay open
+      - name: The counterexample sweep over the fixture rejects exactly these candidates and leaves exactly these open
         working-directory: tools/soundness/fixture
         run: |
           lake env lean --run ../Probes.lean cx-sweep Pr.Cases > "$RUNNER_TEMP/sweep.out"
