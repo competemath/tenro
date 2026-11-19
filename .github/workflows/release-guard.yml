@@ -75,14 +75,16 @@ jobs:
     timeout-minutes: 5
     permissions: { contents: write }
     env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { ref: main, fetch-depth: 1, persist-credentials: true }
+        with: { ref: main, fetch-depth: 1, persist-credentials: false }
       - name: A version tag above max_major is deleted
         run: |
           if python3 core/tools/release_guard.py --tag "$TAG"; then echo "tag $TAG is allowed"; exit 0; fi
-          git push origin ":refs/tags/$TAG"
+          gh api -X DELETE "repos/$REPO/git/refs/tags/$TAG"
           echo "::error::tag $TAG was deleted: no v1 before the owner's explicit approval"
           exit 1
 
