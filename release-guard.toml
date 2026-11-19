@@ -1,0 +1,10 @@
+# No v1 of anything in this repository (Tenro itself, or any library it contains) before the owner's explicit approval; a baseline of quality has to be shown first.
+# The guard is Tengai's own, mirrored in core/ (`core/tools/release_guard.py`, docs: core/docs/release-barrier.md). Raising `max_major` needs an approving review from
+# someone other than the author, and the owner's tag ruleset (core/tools/release-ruleset.json) is what makes a tag above it impossible to push at all.
+max_major = 0
+guard_files = [
+  "release-guard.toml",
+  "core/tools/release_guard.py",
+  ".github/workflows/release-guard.yml",
+  "core/tests/test_release_guard.py",
+]
