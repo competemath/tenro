@@ -11,29 +11,21 @@ import heldout as H  # noqa: E402
 CUTOFF = "2026-07-01"
 
 
-def cand(i, library="a", date=None, deps=(), hyps=2, size=6, aliases=0, **kw):
+def cand(i, library="a", date=None, own_deps=0, dep_domains=(), hyps=2, size=6, aliases=0, **kw):
     c = {
         "id": f"id{i}",
         "name": f"t{i}",
         "library": library,
         "module": f"M.{library}",
         "date": date,
-        "deps": list(deps),
+        "own_deps": own_deps,
+        "dep_domains": list(dep_domains),
         "hyps": hyps,
         "size": size,
         "aliases": aliases,
     }
     c.update(kw)
     return c
-
-
-def world():
-    """a library `a` of 40 lemmas and a library `b` of 40: the dependencies are what the strata are made of"""
-    out = []
-    for i in range(40):
-        out.append(cand(i, "a"))
-        out.append(cand(100 + i, "b"))
-    return out
 
 
 class Rules(unittest.TestCase):
@@ -45,29 +37,32 @@ class Rules(unittest.TestCase):
         self.assertTrue(H.nontrivial(cand(1)))
 
     def test_the_stratum_of_a_theorem(self):
-        lib = {"x1": "a", "x2": "a", "x3": "a", "y1": "b"}
-        self.assertEqual(H.stratum_of(cand(1, date="2026-08-01"), CUTOFF, lib), "post-cutoff")
-        self.assertEqual(H.stratum_of(cand(1, date="2026-06-30", deps=["x1", "x2"]), CUTOFF, lib), "dependency-ablation")
-        self.assertEqual(H.stratum_of(cand(1, deps=["x1", "y1"]), CUTOFF, lib), "cross-domain")
-        self.assertIsNone(H.stratum_of(cand(1, deps=["x1"]), CUTOFF, lib))  # one dependency: not an ablation
-        many = {f"z{k}": "a" for k in range(13)}
-        self.assertEqual(H.stratum_of(cand(1, deps=[f"z{k}" for k in range(12)]), CUTOFF, many), "dependency-ablation")
-        self.assertIsNone(H.stratum_of(cand(1, deps=[f"z{k}" for k in range(13)]), CUTOFF, many))  # too many: not a lemma search
-        self.assertIsNone(H.stratum_of(cand(1), CUTOFF, lib))
+        self.assertEqual(H.stratum_of(cand(1, date="2026-08-01"), CUTOFF), "post-cutoff")
+        self.assertEqual(H.stratum_of(cand(1, date="2026-06-30", own_deps=2), CUTOFF), "dependency-ablation")
+        self.assertEqual(H.stratum_of(cand(1, dep_domains=["Algebra", "Analysis"]), CUTOFF), "cross-domain")
+        self.assertIsNone(H.stratum_of(cand(1, dep_domains=["Algebra"], own_deps=1), CUTOFF))  # one area, one lemma: neither
+        self.assertEqual(H.stratum_of(cand(1, own_deps=12), CUTOFF), "dependency-ablation")
+        self.assertIsNone(H.stratum_of(cand(1, own_deps=13), CUTOFF))  # too many: not a lemma search
+        self.assertIsNone(H.stratum_of(cand(1), CUTOFF))
 
     def test_a_post_cutoff_theorem_is_post_cutoff_even_if_it_is_also_cross_domain(self):
-        lib = {"x1": "a", "y1": "b"}
-        self.assertEqual(H.stratum_of(cand(1, date="2026-09-01", deps=["x1", "y1"]), CUTOFF, lib), "post-cutoff")
+        self.assertEqual(H.stratum_of(cand(1, date="2026-09-01", dep_domains=["A", "B"]), CUTOFF), "post-cutoff")
+
+    def test_a_theorem_dated_before_the_cutoff_or_undated_is_not_post_cutoff(self):
+        self.assertIsNone(H.stratum_of(cand(1, date="2026-06-30"), CUTOFF))
+        self.assertIsNone(H.stratum_of(cand(1, date=None), CUTOFF))
 
 
 class Selection(unittest.TestCase):
     def build(self):
-        cs = world()
-        # 15 post-cutoff theorems, 15 cross-domain (depend on one of each library), 15 ablation (three lemmas of their own library)
+        cs = []
+        # 15 post-cutoff theorems, 15 cross-domain (two areas), 15 ablation (three lemmas of their own library), 40 that are none of them
         for k in range(15):
             cs.append(cand(200 + k, "a", date="2026-08-01"))
-            cs.append(cand(300 + k, "a", deps=[f"id{k}", f"id{100 + k}"]))
-            cs.append(cand(400 + k, "b", deps=[f"id{100 + k}", f"id{101 + k}", f"id{102 + k}"]))
+            cs.append(cand(300 + k, "a", dep_domains=["Algebra", "Analysis"]))
+            cs.append(cand(400 + k, "b", own_deps=3))
+        for k in range(40):
+            cs.append(cand(k, "a"))
         return cs
 
     def test_each_stratum_is_filled_without_overlap_and_the_counts_are_reported(self):

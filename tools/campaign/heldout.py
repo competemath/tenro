@@ -3,12 +3,13 @@
 
   heldout.py CANDIDATES.jsonl --cutoff YYYY-MM-DD [--per-stratum 100] [--seed S] [--max-library-share 0.2] [--out SELECTION.json]
 
-CANDIDATES.jsonl has one theorem per line: {"id": isnad statement id, "name", "library", "module", "date": "YYYY-MM-DD" or null, "deps": [statement ids it depends on], "hyps": int, "size": int,
-"aliases": number of other records that state the same thing}. It is built from `tengoku-isnad` and its `--deps` output (the slice workflows).
+CANDIDATES.jsonl has one theorem per line: {"id": isnad statement id, "name", "library", "module", "date": "YYYY-MM-DD" or null, "own_deps": distinct theorems of its own library its proofs use directly,
+"dep_domains": the distinct areas (Algebra, NumberTheory, a library's name ...) of everything its proofs use, "hyps": int, "size": int, "aliases": number of other records that state the same thing}.
+`candidates.py` builds it from `tengoku-isnad`, its `--deps` output and `DepModules.lean`.
 
 The three strata are those of readiness gate 5, and a theorem is in at most one, chosen in this order of scarcity:
   post-cutoff          `date` is on or after the cutoff: the model cannot have seen the theorem, and no memorised library helps
-  cross-domain         its dependencies lie in two or more libraries: it needs the union Tengoku makes
+  cross-domain         its proofs use theorems from two or more areas (not counting the plumbing: `core`, `Data`, `Order`, `Logic`, ...): it needs the union Tengoku makes
   dependency-ablation  it depends on 2 to 12 other theorems of its own library: the library's lemmas are what a prover has to find
 Every candidate must be non-trivial (`hyps` >= 1 and `size` >= 5, which is 32 or more expression nodes) and state something no other record states (`aliases` == 0): a selected statement is removed from the library
 in both arms of the campaign (invariant I8), and a statement that has an alias would still be there under the alias's name.
@@ -32,20 +33,19 @@ from util import read_jsonl  # noqa: E402
 STRATA = ("post-cutoff", "cross-domain", "dependency-ablation")
 MIN_SIZE, MIN_HYPS = 5, 1
 ABLATION_DEPS = (2, 12)
+CROSS_DOMAINS = 2
 
 
 def nontrivial(c: dict) -> bool:
     return c.get("hyps", 0) >= MIN_HYPS and c.get("size", 0) >= MIN_SIZE and c.get("aliases", 0) == 0 and bool(c.get("id"))
 
 
-def stratum_of(c: dict, cutoff: str, library_of: dict[str, str]) -> str | None:
+def stratum_of(c: dict, cutoff: str) -> str | None:
     if c.get("date") and c["date"] >= cutoff:
         return "post-cutoff"
-    libs = {library_of[d] for d in c.get("deps", []) if d in library_of}
-    if len(libs) >= 2:
+    if len(set(c.get("dep_domains", []))) >= CROSS_DOMAINS:
         return "cross-domain"
-    own = [d for d in c.get("deps", []) if library_of.get(d) == c["library"]]
-    if ABLATION_DEPS[0] <= len(set(own)) <= ABLATION_DEPS[1]:
+    if ABLATION_DEPS[0] <= c.get("own_deps", 0) <= ABLATION_DEPS[1]:
         return "dependency-ablation"
     return None
 
@@ -55,11 +55,10 @@ def rank(seed: str, ident: str) -> str:
 
 
 def select(candidates: list[dict], cutoff: str, per_stratum: int, seed: str, max_share: float) -> dict:
-    library_of = {c["id"]: c["library"] for c in candidates if c.get("id")}
     pools: dict[str, list[dict]] = {s: [] for s in STRATA}
     for c in candidates:
         if nontrivial(c):
-            s = stratum_of(c, cutoff, library_of)
+            s = stratum_of(c, cutoff)
             if s:
                 pools[s].append(c)
     chosen: dict[str, list[dict]] = {}
