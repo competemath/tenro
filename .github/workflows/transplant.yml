@@ -93,14 +93,17 @@ jobs:
           core_path="$(lake env printenv LEAN_PATH)"
           export LEAN_PATH="$RUNNER_TEMP/out:$core_path"
           printf 'import Init\n' > "$RUNNER_TEMP/empty.lean"
-          { printf 'import TengaiData.Sample\n'; head -3 "$RUNNER_TEMP/names.txt" | while read -r n; do printf '#print axioms %s\n' "$n"; done; } > "$RUNNER_TEMP/check.lean"
+          { printf 'import TengaiData.Sample\n'; while read -r n; do printf '#print axioms %s\n' "$n"; done < "$RUNNER_TEMP/names.txt"; } > "$RUNNER_TEMP/check.lean"
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty.json"
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/check.lean" | tee "$RUNNER_TEMP/import-sample.json"
-          lake env lean "$RUNNER_TEMP/check.lean" | head -12
+          lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/axioms.txt"
+          head -4 "$RUNNER_TEMP/axioms.txt"
       - name: "The statements are the statements (the promotion lens: isnad ids of the replayed theorems against Tengoku's)"
         run: |
           core_path="$(cd "$TOOLS" && lake env printenv LEAN_PATH)"
-          (cd "$TOOLS" && LEAN_PATH="$RUNNER_TEMP/out:$core_path" "$TOOLS/.lake/build/bin/tengoku-isnad" --module TengaiData.Sample) > "$RUNNER_TEMP/isnad-replayed.tsv"
+          (cd "$TOOLS" && LEAN_PATH="$RUNNER_TEMP/out:$core_path" "$TOOLS/.lake/build/bin/tengoku-isnad" --module TengaiData.Sample) > "$RUNNER_TEMP/isnad-replayed.tsv" 2> "$RUNNER_TEMP/isnad-replayed.err" || true
+          # tengoku-isnad reads every constant of the module, Mathlib's private numbered names included, and panics (non-fatally) on those it cannot name: counted, not hidden
+          echo "isnad panics on unnameable constants: $(grep -c PANIC "$RUNNER_TEMP/isnad-replayed.err" || true)"
           wc -l "$RUNNER_TEMP/isnad-replayed.tsv"
           python3 tools/promote/compare_ids.py --isnad-py "$TOOLS/scripts/isnad.py" --names "$RUNNER_TEMP/names.txt" --source "$RUNNER_TEMP/isnad.tsv" --replayed "$RUNNER_TEMP/isnad-replayed.tsv" --out "$RUNNER_TEMP/statement-ids.json" || echo "statement ids differ" > "$RUNNER_TEMP/statement-ids.failed"
       - name: The built module checked again by nanoda (an independent checker, shares no code with Lean; invariant I1)
@@ -114,11 +117,12 @@ jobs:
           # the replayed module read back out of its .olean: what is checked is the built artifact, not the export it came from
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" TengaiData.Sample > "$RUNNER_TEMP/replayed.ndjson"
           wc -lc "$RUNNER_TEMP/replayed.ndjson"
+          # the export holds all of Lean core, which declares sorryAx and the compiler axioms (as in Tengoku's nightly): nanoda admits them; what the SAMPLE depends on is checked separately, theorem by theorem
           cat > "$RUNNER_TEMP/nanoda.json" <<JSON
           {
             "export_file_path": "$RUNNER_TEMP/replayed.ndjson",
             "use_stdin": false,
-            "permitted_axioms": ["propext", "Classical.choice", "Quot.sound"],
+            "permitted_axioms": ["propext", "Classical.choice", "Quot.sound", "sorryAx", "Lean.ofReduceBool", "Lean.ofReduceNat", "Lean.trustCompiler"],
             "unpermitted_axiom_hard_error": true,
             "num_threads": 4,
             "nat_extension": true,
@@ -168,7 +172,21 @@ jobs:
             ${{ runner.temp }}/nanoda.status
             ${{ runner.temp }}/statement-ids.json
           retention-days: 30
-      - name: The independent check and the statement ids must have passed
+      - name: The independent check, the statement ids and the axioms must have passed
         run: |
           test "$(cat "$RUNNER_TEMP/nanoda.status")" = ok
           test ! -e "$RUNNER_TEMP/statement-ids.failed"
+          python3 - <<'PY'
+          import os, re
+          t = os.environ["RUNNER_TEMP"]
+          names = [n for n in open(f"{t}/names.txt").read().split() if n]
+          text = open(f"{t}/axioms.txt").read()
+          allowed = {"propext", "Classical.choice", "Quot.sound"}
+          seen = set()
+          for m in re.finditer(r"'([^']+)' (depends on axioms: \[([^\]]*)\]|does not depend on any axioms)", text):
+              seen.add(m.group(1))
+              used = {a.strip() for a in (m.group(3) or "").split(",") if a.strip()}
+              assert used <= allowed, f"{m.group(1)} depends on {sorted(used - allowed)}"
+          assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
+          print(f"axioms: {len(names)} theorems, all within {sorted(allowed)}")
+          PY
