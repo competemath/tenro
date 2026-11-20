@@ -49,12 +49,6 @@ jobs:
           git checkout -q "$pin"
           lake build tengoku-isnad 2>&1 | tail -3
           echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
-      - name: The modules of the library
-        run: |
-          test -d ".tengoku/Tengoku/$LIB"
-          { echo "Tengoku.$LIB"; (cd .tengoku && find "Tengoku/$LIB" -name '*.lean' | sed 's#\.lean$##; s#/#.#g' | sort); } | sort -u > "$RUNNER_TEMP/modules.txt"
-          test -f ".tengoku/Tengoku/$LIB.lean" || sed -i "/^Tengoku\.$LIB\$/d" "$RUNNER_TEMP/modules.txt"
-          wc -l "$RUNNER_TEMP/modules.txt"
       - name: Each library - records, dependencies, where the outside dependencies live
         working-directory: .tengoku
         run: |
