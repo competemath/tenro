@@ -52,14 +52,24 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--isnad-py", required=True)
     ap.add_argument("--names", required=True)
-    ap.add_argument("--source", required=True)
+    ap.add_argument("--source")
+    ap.add_argument(
+        "--source-jsonl",
+        help="SAMPLE.jsonl of pick.py (name, id, ...): the Tengoku ids as candidates.jsonl recorded them, instead of an isnad run over the source modules",
+    )
     ap.add_argument("--replayed", required=True)
     ap.add_argument("--out")
     a = ap.parse_args(argv)
     isnad = load_module(Path(a.isnad_py))
     names = [n for n in Path(a.names).read_text(encoding="utf-8").splitlines() if n.strip()]
     wanted = set(names)
-    source = ids_of(isnad, Path(a.source).read_text(encoding="utf-8").splitlines(), wanted)
+    if a.source_jsonl:
+        rows = [json.loads(ln) for ln in Path(a.source_jsonl).read_text(encoding="utf-8").splitlines() if ln.strip()]
+        source = {r["name"]: r["id"] for r in rows if r["name"] in wanted}
+    elif a.source:
+        source = ids_of(isnad, Path(a.source).read_text(encoding="utf-8").splitlines(), wanted)
+    else:
+        ap.error("give --source or --source-jsonl")
     replayed = ids_of(isnad, Path(a.replayed).read_text(encoding="utf-8").splitlines(), wanted)
     report = compare(names, source, replayed)
     text = json.dumps(report, sort_keys=True)
