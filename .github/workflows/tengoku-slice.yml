@@ -1,0 +1,99 @@
+# Gate 1 on a real Tengoku library: the same instruments as `slice` (Init.Data.Nat), run on the modules of one library of the tree at tengoku.pin, against Tengoku's own compiled cache.
+# Manual: it reads a library of thousands of declarations. Output (artifact): the hygiene counts (lemmas per definition, structural duplicates), the two probes (what they looked at, what they found).
+# It measures; it changes nothing and proves nothing.
+name: tengoku-slice
+on:
+  workflow_dispatch:
+    inputs:
+      library:
+        description: "Library directory under Tengoku/ (e.g. Aintlib: modules Tengoku.Aintlib and below)"
+        required: true
+        default: "Aintlib"
+permissions: {}
+concurrency:
+  group: tengoku-slice-${{ inputs.library }}
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  LIB: ${{ inputs.library }}
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  slice:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions: { contents: read }
+    steps:
+      - name: Free disk (Tengoku's compiled cache is several GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm /usr/share/miniconda /usr/local/share/powershell /usr/local/lib/node_modules /opt/az /usr/local/graalvm /usr/local/share/chromium
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Tengoku at the pin, with its compiled cache
+        run: scripts/tengoku-setup.sh
+      - name: tengoku-isnad and the scripts at tengoku-tools.pin
+        run: |
+          pin="$(tr -d '[:space:]' < tengoku-tools.pin)"
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]] || { echo "tengoku-tools.pin must hold a full 40-character commit"; exit 1; }
+          git clone -q --filter=blob:none --no-checkout https://github.com/competemath/tengoku "$RUNNER_TEMP/tengoku-tools"
+          cd "$RUNNER_TEMP/tengoku-tools"
+          git sparse-checkout set --no-cone '/TengokuIsnad.lean' '/scripts/' '/lakefile.toml' '/lean-toolchain' '/tools/isnad/'
+          git checkout -q "$pin"
+          lake build tengoku-isnad 2>&1 | tail -3
+          echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
+      - name: The modules of the library
+        run: |
+          test -d ".tengoku/Tengoku/$LIB"
+          { echo "Tengoku.$LIB"; (cd .tengoku && find "Tengoku/$LIB" -name '*.lean' | sed 's#\.lean$##; s#/#.#g' | sort); } | sort -u > "$RUNNER_TEMP/modules.txt"
+          test -f ".tengoku/Tengoku/$LIB.lean" || sed -i "/^Tengoku\.$LIB\$/d" "$RUNNER_TEMP/modules.txt"
+          wc -l "$RUNNER_TEMP/modules.txt"
+      - name: Records (tengoku-isnad) of the library
+        run: |
+          cd .tengoku
+          python3 ../tools/calibration/run_isnad.py --modules "$RUNNER_TEMP/modules.txt" --out "$RUNNER_TEMP/isnad.tsv" --failed "$RUNNER_TEMP/isnad-failed.txt" --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad"
+          wc -l "$RUNNER_TEMP/isnad.tsv" "$RUNNER_TEMP/isnad-failed.txt"
+      - name: Lemma and definition counts, and the structural duplicates
+        working-directory: .tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/readiness/DataStats.lean" "Tengoku.$LIB" > "$RUNNER_TEMP/counts.json"
+          python3 "$GITHUB_WORKSPACE/tools/readiness/data_stats.py" "$RUNNER_TEMP/counts.json" "$RUNNER_TEMP/isnad.tsv" --isnad-py "$TOOLS/scripts/isnad.py" | tee "$RUNNER_TEMP/data-stats.json"
+      - name: The hypothesis-dropping probe (what it looked at, what it found)
+        working-directory: .tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/soundness/Probes.lean" unused-hyps "Tengoku.$LIB" > "$RUNNER_TEMP/probe.out" 2> "$RUNNER_TEMP/probe.err"
+          tail -1 "$RUNNER_TEMP/probe.err"
+          python3 "$GITHUB_WORKSPACE/tools/soundness/probe_findings.py" hypothesis-dropping < "$RUNNER_TEMP/probe.out" > "$RUNNER_TEMP/hd.json"
+          python3 -c 'import json,sys; sys.path.insert(0, sys.argv[1]); import verdict; d = json.load(open(sys.argv[2])); r = verdict.check_findings(d, require_examined=True); print(d["examined"], len(d["findings"]), "findings", r["status"])' "$GITHUB_WORKSPACE/tools/soundness" "$RUNNER_TEMP/hd.json"
+      - name: The counterexample sweep
+        working-directory: .tengoku
+        run: |
+          lake env lean --run "$GITHUB_WORKSPACE/tools/soundness/Probes.lean" cx-sweep "Tengoku.$LIB" > "$RUNNER_TEMP/sweep.out" 2> "$RUNNER_TEMP/sweep.err"
+          tail -1 "$RUNNER_TEMP/sweep.err"
+          head -1 "$RUNNER_TEMP/sweep.out" | tr '\t' ' '
+      - name: Summary
+        run: |
+          {
+            echo "## Gate 1 on Tengoku.$LIB (tengoku.pin $(tr -d '[:space:]' < tengoku.pin | cut -c1-12))"
+            echo '```json'; cat "$RUNNER_TEMP/data-stats.json"; echo '```'
+            echo "hypothesis-dropping: $(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["examined"], len(d["findings"]), "findings")' "$RUNNER_TEMP/hd.json")"
+            echo "counterexample sweep (examined, candidates, out of reach, searched, rejected, undecided): $(head -1 "$RUNNER_TEMP/sweep.out" | tr '\t' ' ')"
+            echo "modules that did not import: $(wc -l < "$RUNNER_TEMP/isnad-failed.txt")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tengoku-slice-${{ inputs.library }}
+          path: |
+            ${{ runner.temp }}/data-stats.json
+            ${{ runner.temp }}/counts.json
+            ${{ runner.temp }}/hd.json
+            ${{ runner.temp }}/sweep.out
+            ${{ runner.temp }}/isnad-failed.txt
+          retention-days: 30
