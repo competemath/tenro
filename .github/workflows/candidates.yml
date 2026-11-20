@@ -59,7 +59,7 @@ jobs:
             { echo "Tengoku.$LIB"; find "Tengoku/$LIB" -name '*.lean' | sed 's#\.lean$##; s#/#.#g' | sort; } | sort -u > "$RUNNER_TEMP/$LIB.modules"
             test -f "Tengoku/$LIB.lean" || sed -i "/^Tengoku\.$LIB\$/d" "$RUNNER_TEMP/$LIB.modules"
             python3 ../tools/calibration/run_isnad.py --modules "$RUNNER_TEMP/$LIB.modules" --out "$RUNNER_TEMP/$LIB.isnad.tsv" --failed "$RUNNER_TEMP/$LIB.failed" --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad"
-            python3 ../tools/calibration/run_isnad.py --modules "$RUNNER_TEMP/$LIB.modules" --out "$RUNNER_TEMP/$LIB.deps.tsv" --failed "$RUNNER_TEMP/$LIB.deps-failed" --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad" --extra-arg --deps --prefix isnad1-deps
+            python3 ../tools/calibration/run_isnad.py --modules "$RUNNER_TEMP/$LIB.modules" --out "$RUNNER_TEMP/$LIB.deps.tsv" --failed "$RUNNER_TEMP/$LIB.deps-failed" --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad" --extra-arg=--deps --prefix isnad1-deps
             # every dependency name that is not a theorem of the library: those are the ones whose module is looked up
             python3 - "$RUNNER_TEMP/$LIB.isnad.tsv" "$RUNNER_TEMP/$LIB.deps.tsv" > "$RUNNER_TEMP/$LIB.names" <<'PY'
           import sys
