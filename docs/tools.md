@@ -30,3 +30,7 @@ Local development: a minimal Lean is enough for the fixtures (`lake build` in `t
 
 The 17 that stay open WITH evidence are the generalisations worth a proof attempt first. The 16 undecided have no evidence either way: a conclusion the probe cannot evaluate (an existential, for instance) is never refuted, so
 `exists_eq_add_one_of_ne_zero` with its hypothesis dropped is among them although it is false at `n = 0`; the sweep says so (`undecided`) instead of counting it as support. The earlier count of 33 open mixed the two.
+
+## The campaign (`tools/campaign/campaign.py`, docs/campaign.md)
+
+Registers a campaign before it runs and reads its paired result once, after every problem of both arms is complete: `split-hash`, `register`, `analyse`. The owner's part and the exact decisions are in docs/campaign.md; tests in `tests/test_campaign.py` (18, standard library only).
