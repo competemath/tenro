@@ -36,6 +36,20 @@ class Compare(unittest.TestCase):
         self.assertEqual(r["missing_in_source"], ["d"])
         self.assertFalse(r["ok"])
 
+    def test_drift_is_the_same_statement_with_other_hyps_or_size(self):
+        src = {"a": "dvd.1h3v.s6.397d2ae1b629", "b": "isiso.1h6v.s7.dd8b3fd48240", "c": "eq.1h1v.s5.aaaaaaaaaaaa"}
+        rep = {"a": "dvd.1h3v.s5.397d2ae1b629", "b": "isiso.2h6v.s7.dd8b3fd48240", "c": "eq.1h1v.s5.bbbbbbbbbbbb"}
+        r = C.compare(["a", "b", "c"], src, rep)
+        self.assertEqual([d["name"] for d in r["drift"]], ["a", "b"])
+        self.assertEqual([d["name"] for d in r["different"]], ["c"])  # another canonical hash: a changed statement
+        self.assertFalse(r["ok"])
+        r2 = C.compare(["a", "b"], src, rep)
+        self.assertTrue(r2["ok"])
+        self.assertEqual(len(r2["drift"]), 2)
+        # another number of variables is not drift
+        r3 = C.compare(["a"], {"a": "dvd.1h3v.s6.397d2ae1b629"}, {"a": "dvd.1h4v.s6.397d2ae1b629"})
+        self.assertEqual(len(r3["different"]), 1)
+
     def test_all_equal_is_ok(self):
         r = C.compare(["a"], {"a": "x"}, {"a": "x"})
         self.assertTrue(r["ok"])
