@@ -132,6 +132,7 @@ jobs:
           "$nanoda" "$RUNNER_TEMP/nanoda-selftest.json"
           if /usr/bin/time -v "$nanoda" "$RUNNER_TEMP/nanoda.json" > "$RUNNER_TEMP/nanoda.out" 2> "$RUNNER_TEMP/nanoda-time.txt"; then echo ok > "$RUNNER_TEMP/nanoda.status"; else echo FAILED > "$RUNNER_TEMP/nanoda.status"; fi
           tail -3 "$RUNNER_TEMP/nanoda.out"
+          if [ "$(cat "$RUNNER_TEMP/nanoda.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-time.txt"; fi
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-time.txt" || true
       - name: Summary
         run: |
@@ -163,6 +164,7 @@ jobs:
             ${{ runner.temp }}/import-empty.json
             ${{ runner.temp }}/import-sample.json
             ${{ runner.temp }}/nanoda.out
+            ${{ runner.temp }}/nanoda-time.txt
             ${{ runner.temp }}/nanoda.status
             ${{ runner.temp }}/statement-ids.json
           retention-days: 30
