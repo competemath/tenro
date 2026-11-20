@@ -3,7 +3,7 @@
 Nothing in Tenro runs a prover. A campaign is the owner's runs, recorded in a form the tools can read once (`eval/protocol.md`).
 
 **What the owner provides**
-1. **The held-out id list** (private `competemath/tenro-eval`; ids only ever leave it as a hash): one problem id per line, split into the three strata of readiness gate 5 (post-cutoff, dependency-ablation, cross-domain).
+1. **The held-out id list** (chosen by the written rules of [heldout-selection](heldout-selection.md) when the owner delegates it) (private `competemath/tenro-eval`; ids only ever leave it as a hash): one problem id per line, split into the three strata of readiness gate 5 (post-cutoff, dependency-ablation, cross-domain).
    `python3 tools/campaign/campaign.py split-hash IDS.txt` prints the `split` hash.
 2. **A registration** `campaign.json` spec (fields in the docstring of `tools/campaign/campaign.py`): the protocol hash (`sha256sum eval/protocol.md`), the split hash, `n`, `psi`, the two arms (same model, turn cap and sample budget in both), and the primary claim
    (superiority with an expected gain, or non-inferiority with a margin). `campaign.py register SPEC.json --out DIR` refuses an incomplete or inconsistent registration and says whether `n` is enough for the claim (otherwise: underpowered, to learn from, never to decide).
