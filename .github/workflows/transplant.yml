@@ -1,0 +1,123 @@
+# The transplant measurement (ADR-0005): a seeded sample of theorems of one Tengoku library is exported with its whole closure (lean4export), replayed through the kernel by
+# tengai-replay (core/, tengai v0.0.9) into a built .olean, and the cold-import time of that module is measured against an empty one. Manual. It measures; it changes nothing.
+name: transplant
+on:
+  workflow_dispatch:
+    inputs:
+      library:
+        description: "Library directory under Tengoku/ (e.g. Aintlib)"
+        required: true
+        default: "Aintlib"
+      count:
+        description: "How many theorems to transplant"
+        required: true
+        default: "30"
+      seed:
+        description: "Sample seed"
+        required: true
+        default: "transplant-1"
+permissions: {}
+concurrency:
+  group: transplant
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  LIB: ${{ inputs.library }}
+  COUNT: ${{ inputs.count }}
+  SEED: ${{ inputs.seed }}
+  LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  transplant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    permissions: { contents: read }
+    steps:
+      - name: Free disk (Tengoku's compiled cache is several GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm /usr/share/miniconda /usr/local/share/powershell /usr/local/lib/node_modules /opt/az /usr/local/graalvm /usr/local/share/chromium
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Tengoku at the pin, with its compiled cache
+        run: scripts/tengoku-setup.sh
+      - name: tengoku-isnad and the scripts at tengoku-tools.pin
+        run: |
+          pin="$(tr -d '[:space:]' < tengoku-tools.pin)"
+          [[ "$pin" =~ ^[0-9a-f]{40}$ ]] || { echo "tengoku-tools.pin must hold a full 40-character commit"; exit 1; }
+          git clone -q --filter=blob:none --no-checkout https://github.com/competemath/tengoku "$RUNNER_TEMP/tengoku-tools"
+          cd "$RUNNER_TEMP/tengoku-tools"
+          git sparse-checkout set --no-cone '/TengokuIsnad.lean' '/scripts/' '/lakefile.toml' '/lean-toolchain' '/tools/isnad/'
+          git checkout -q "$pin"
+          lake build tengoku-isnad 2>&1 | tail -3
+          echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
+      - name: A seeded sample of the library
+        run: |
+          [[ "$LIB" =~ ^[A-Za-z0-9_]+$ && "$COUNT" =~ ^[0-9]+$ ]] || { echo "bad input"; exit 1; }
+          test -d ".tengoku/Tengoku/$LIB"
+          { echo "Tengoku.$LIB"; (cd .tengoku && find "Tengoku/$LIB" -name '*.lean' | sed 's#\.lean$##; s#/#.#g' | sort); } | sort -u > "$RUNNER_TEMP/lib.modules"
+          test -f ".tengoku/Tengoku/$LIB.lean" || sed -i "/^Tengoku\.$LIB\$/d" "$RUNNER_TEMP/lib.modules"
+          (cd .tengoku && python3 ../tools/calibration/run_isnad.py --modules "$RUNNER_TEMP/lib.modules" --out "$RUNNER_TEMP/isnad.tsv" --failed "$RUNNER_TEMP/isnad-failed.txt" --jobs 2 --exe "$TOOLS/.lake/build/bin/tengoku-isnad")
+          python3 tools/promote/pick.py "$RUNNER_TEMP/isnad.tsv" --n "$COUNT" --seed "$SEED" --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt"
+      - name: lean4export at the pinned commit
+        run: |
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
+          git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
+          cd "$RUNNER_TEMP/lean4export" && lake build 2>&1 | tail -3
+      - name: Export the closure of the sample
+        working-directory: .tengoku
+        run: |
+          mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
+          mapfile -t names < "$RUNNER_TEMP/names.txt"
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson"
+          wc -lc "$RUNNER_TEMP/sample.ndjson"
+      - name: tengai-replay from core/ (kernel replay into Lean core alone)
+        run: |
+          (cd core && lake build tengai-replay 2>&1 | tail -3)
+          mkdir -p "$RUNNER_TEMP/out"
+          /usr/bin/time -v core/.lake/build/bin/tengai-replay "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt"
+          ls -l "$RUNNER_TEMP/out/TengaiData/Sample.olean"
+      - name: The cold import, against an empty module, and the axioms of the sample
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/out:$core_path"
+          printf 'import Init\n' > "$RUNNER_TEMP/empty.lean"
+          { printf 'import TengaiData.Sample\n'; head -3 "$RUNNER_TEMP/names.txt" | while read -r n; do printf '#print axioms %s\n' "$n"; done; } > "$RUNNER_TEMP/check.lean"
+          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty.json"
+          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/check.lean" | tee "$RUNNER_TEMP/import-sample.json"
+          lake env lean "$RUNNER_TEMP/check.lean" | head -12
+      - name: Summary
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          stats = json.loads(open(f"{t}/replay-stats.json").read().strip().splitlines()[-1])
+          empty = json.load(open(f"{t}/import-empty.json"))
+          sample = json.load(open(f"{t}/import-sample.json"))
+          olean = os.path.getsize(f"{t}/out/TengaiData/Sample.olean")
+          export = os.path.getsize(f"{t}/sample.ndjson")
+          print("## transplant of a sample of " + os.environ["LIB"])
+          print(f"theorems {os.environ['COUNT']}, seed {os.environ['SEED']}; constants added {stats['added']}, already in Lean core {stats['skipped']}, inductive groups {stats['inductives']}")
+          print(f"export {export/1e6:.1f} MB; olean {olean/1e6:.1f} MB")
+          print(f"cold import (median of {len(sample['runs'])}): empty module {empty['median']} s, with the sample {sample['median']} s (net {sample['median']-empty['median']:.3f} s); cap C_load 0.25 s")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: transplant-${{ inputs.library }}
+          path: |
+            ${{ runner.temp }}/names.txt
+            ${{ runner.temp }}/replay-stats.json
+            ${{ runner.temp }}/replay-time.txt
+            ${{ runner.temp }}/import-empty.json
+            ${{ runner.temp }}/import-sample.json
+          retention-days: 30
