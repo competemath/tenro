@@ -33,4 +33,4 @@ The 17 that stay open WITH evidence are the generalisations worth a proof attemp
 
 ## The campaign (`tools/campaign/campaign.py`, docs/campaign.md)
 
-Registers a campaign before it runs and reads its paired result once, after every problem of both arms is complete: `split-hash`, `register`, `analyse`. The owner's part and the exact decisions are in docs/campaign.md; tests in `tests/test_campaign.py` (18, standard library only).
+Registers a campaign before it runs and reads its paired result once, after every problem of both arms is complete: `split-hash`, `register`, `analyse`. The owner's part and the exact decisions are in docs/campaign.md; the cost axes are `tools/campaign/secondary.py` (paired Wilcoxon on log cost ratios); tests in `tests/test_campaign.py` and `tests/test_campaign_secondary.py` (standard library only).
