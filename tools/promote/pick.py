@@ -3,7 +3,7 @@
 
   pick.py ISNAD.tsv --n 30 --seed S --names NAMES.txt --modules MODULES.txt
 
-ISNAD.tsv is `tengoku-isnad` over a library's modules (`isnad1<TAB>name<TAB>module<TAB>hyps<TAB>nodes<TAB>id...`). A theorem qualifies when it has a hypothesis and at least 32 nodes (docs/heldout-selection.md: no
+ISNAD.tsv is `tengoku-isnad` over a library's modules: ten tab-separated columns, `isnad1 name module kind hyps vars nodes canonical shape vocab` (Tengoku's scripts/isnad.py, Record.FIELDS). A theorem qualifies when it has a hypothesis and at least 32 nodes (docs/heldout-selection.md: no
 one-liner counts), and a name is taken once. The order is sha256(seed + name): the same file and seed give the same sample. NAMES.txt has one name a line, MODULES.txt the modules those names live in.
 """
 
@@ -22,10 +22,10 @@ def qualifying(lines: list[str]) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for ln in lines:
         p = ln.rstrip("\n").split("\t")
-        if len(p) < 6 or p[0] != "isnad1":
+        if len(p) != 10 or p[0] != "isnad1":
             continue
-        name, module = p[1], p[2]
-        if name in seen or int(p[3]) < 1 or int(p[4]) < MIN_NODES:
+        name, module, hyps, nodes = p[1], p[2], int(p[4]), int(p[6])
+        if name in seen or hyps < 1 or nodes < MIN_NODES:
             continue
         seen.add(name)
         out.append((name, module))
