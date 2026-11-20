@@ -8,7 +8,8 @@ import pick as P  # noqa: E402
 
 
 def line(name, module, hyps, nodes):
-    return f"isnad1\t{name}\t{module}\t{hyps}\t{nodes}\tid.{name}"
+    # the real layout (Tengoku scripts/isnad.py Record.FIELDS): isnad1 name module kind hyps vars nodes canonical shape vocab
+    return "\t".join(["isnad1", name, module, "eq", str(hyps), "1", str(nodes), "canon", "shape", "vocab"])
 
 
 LINES = [
