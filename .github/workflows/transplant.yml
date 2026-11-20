@@ -8,6 +8,10 @@ on:
         description: "Library directory under Tengoku/ (e.g. Aintlib); with candidates_run, several separated by spaces"
         required: true
         default: "Aintlib"
+      extensions:
+        description: "Carry the extension entries (reducibility, classes, instances, projection info) from Tengoku into the built module (two replay passes: the first finds what was added, tengai-extinfo reads it in Tengoku, the second applies it)"
+        required: true
+        default: "true"
       candidates_run:
         description: "Run id of a `candidates` run whose artifact lists the theorems (several libraries, no isnad pass). Empty: sample one library by an isnad pass."
         required: false
@@ -30,6 +34,7 @@ defaults:
 env:
   LIB: ${{ inputs.library }}
   CAND_RUN: ${{ inputs.candidates_run }}
+  EXTENSIONS: ${{ inputs.extensions }}
   COUNT: ${{ inputs.count }}
   SEED: ${{ inputs.seed }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
@@ -93,11 +98,24 @@ jobs:
           mapfile -t names < "$RUNNER_TEMP/names.txt"
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson"
           wc -lc "$RUNNER_TEMP/sample.ndjson"
-      - name: tengai-replay from core/ (kernel replay into Lean core alone)
+      - name: tengai-replay from core/ (kernel replay into Lean core alone, then the extension entries put back)
         run: |
-          (cd core && lake build tengai-replay 2>&1 | tail -3)
+          (cd core && lake build tengai-replay tengai-extinfo 2>&1 | tail -3)
           mkdir -p "$RUNNER_TEMP/out"
-          /usr/bin/time -v core/.lake/build/bin/tengai-replay "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"
+          replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
+          ext_args=()
+          if [ "$EXTENSIONS" = true ]; then
+            # pass 1 only finds which constants were added (its module is thrown away); the extension entries of exactly those are read in Tengoku's environment
+            mkdir -p "$RUNNER_TEMP/out1"
+            "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out1" --added "$RUNNER_TEMP/added.jsonl" > /dev/null
+            wc -l "$RUNNER_TEMP/added.jsonl"
+            (cd .tengoku && lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo" "$RUNNER_TEMP/added.jsonl" Tengoku.All) > "$RUNNER_TEMP/ext.jsonl" 2> "$RUNNER_TEMP/extinfo.err"
+            tail -1 "$RUNNER_TEMP/extinfo.err"
+            wc -l "$RUNNER_TEMP/ext.jsonl"
+            rm -rf "$RUNNER_TEMP/out1"
+            ext_args=(--ext "$RUNNER_TEMP/ext.jsonl")
+          fi
+          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" "${ext_args[@]}" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt"
           ls -l "$RUNNER_TEMP/out/TengaiData/Sample.olean"
       - name: The cold import, against an empty module, and the axioms of the sample
@@ -113,6 +131,14 @@ jobs:
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/import-only.lean" | tee "$RUNNER_TEMP/import-sample.json"
           lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/axioms.txt"
           head -4 "$RUNNER_TEMP/axioms.txt"
+      - name: Instances found in the built module (informational - what a prover on a concrete goal needs)
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/out:$core_path"
+          printf 'import TengaiData.Sample\n#synth Field Real\n#synth CommRing Int\n#synth Monoid Nat\n#synth Group (Equiv.Perm Nat)\n' > "$RUNNER_TEMP/synth.lean"
+          lake env lean "$RUNNER_TEMP/synth.lean" > "$RUNNER_TEMP/synth.txt" 2>&1 || true
+          head -20 "$RUNNER_TEMP/synth.txt"
       - name: "The statements are the statements (the promotion lens: isnad ids of the replayed theorems against Tengoku's)"
         run: |
           core_path="$(cd "$TOOLS" && lake env printenv LEAN_PATH)"
@@ -179,7 +205,10 @@ jobs:
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json, os
           t = os.environ["RUNNER_TEMP"]
-          stats = json.loads(open(f"{t}/replay-stats.json").read().strip().splitlines()[-1])
+          raw = json.loads(open(f"{t}/replay-stats.json").read().strip().splitlines()[-1])
+          stats = raw.get("replay", raw)
+          print(f"extension entries carried: {raw.get('ext')}")
+          print("instances in the built module: " + " | ".join(ln.strip()[:90] for ln in open(f"{t}/synth.txt").read().splitlines()[:6]))
           empty = json.load(open(f"{t}/import-empty.json"))
           sample = json.load(open(f"{t}/import-sample.json"))
           olean = os.path.getsize(f"{t}/out/TengaiData/Sample.olean")
@@ -204,6 +233,8 @@ jobs:
           path: |
             ${{ runner.temp }}/names.txt
             ${{ runner.temp }}/replay-stats.json
+            ${{ runner.temp }}/synth.txt
+            ${{ runner.temp }}/ext.jsonl
             ${{ runner.temp }}/replay-time.txt
             ${{ runner.temp }}/import-empty.json
             ${{ runner.temp }}/import-sample.json
