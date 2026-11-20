@@ -1,6 +1,6 @@
 # The candidates of a held-out selection (docs/heldout-selection.md): for each library read at tengoku.pin, the isnad records, the dependencies of each theorem, and where the dependencies outside the library live,
 # joined by tools/campaign/candidates.py into candidates.jsonl. Manual: it reads whole libraries. It measures; it changes nothing.
-# Dates: this workflow writes none (the Tengoku intake date is not the date a theorem was published, and would let an old theorem pass as post-cutoff); `date` is null until the upstream-date step supplies --dates.
+# Dates: from the upstream repository's history (tools/campaign/dates.py), never from the Tengoku intake date (that is when we copied a file, and would let an old theorem pass as post-cutoff).
 name: candidates
 on:
   workflow_dispatch:
@@ -53,6 +53,7 @@ jobs:
         working-directory: .tengoku
         run: |
           args=()
+          : > "$RUNNER_TEMP/dates.tsv"
           for LIB in $LIBS; do
             [[ "$LIB" =~ ^[A-Za-z0-9_]+$ ]] || { echo "not a library name: $LIB"; exit 1; }
             test -d "Tengoku/$LIB"
@@ -72,10 +73,12 @@ jobs:
           print("\n".join(sorted(out)))
           PY
             lake env lean --run "$GITHUB_WORKSPACE/tools/campaign/DepModules.lean" "$RUNNER_TEMP/$LIB.names" Tengoku.All > "$RUNNER_TEMP/$LIB.depmod.tsv"
+            python3 ../tools/campaign/dates.py --sources schemas/sources.json --library "$LIB" --modules "$RUNNER_TEMP/$LIB.modules" --out "$RUNNER_TEMP/$LIB.dates.tsv" --workdir "$RUNNER_TEMP/upstream"
+            cat "$RUNNER_TEMP/$LIB.dates.tsv" >> "$RUNNER_TEMP/dates.tsv"
             args+=(--library "$LIB" "$RUNNER_TEMP/$LIB.isnad.tsv" "$RUNNER_TEMP/$LIB.deps.tsv" "$RUNNER_TEMP/$LIB.depmod.tsv")
             wc -l "$RUNNER_TEMP/$LIB.isnad.tsv" "$RUNNER_TEMP/$LIB.deps.tsv" "$RUNNER_TEMP/$LIB.depmod.tsv" "$RUNNER_TEMP/$LIB.failed"
           done
-          python3 ../tools/campaign/candidates.py --isnad-py "$TOOLS/scripts/isnad.py" "${args[@]}" --out "$RUNNER_TEMP/candidates.jsonl" | tee "$RUNNER_TEMP/candidates-summary.json"
+          python3 ../tools/campaign/candidates.py --isnad-py "$TOOLS/scripts/isnad.py" "${args[@]}" --dates "$RUNNER_TEMP/dates.tsv" --out "$RUNNER_TEMP/candidates.jsonl" | tee "$RUNNER_TEMP/candidates-summary.json"
       - name: Summary
         run: |
           { echo "## candidates for: $LIBS (tengoku.pin $(tr -d '[:space:]' < tengoku.pin | cut -c1-12))"; echo '```json'; cat "$RUNNER_TEMP/candidates-summary.json"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
