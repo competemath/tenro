@@ -26,13 +26,14 @@ def spec(n=4, **over):
         "hypothesis": "hyp",
         "arms": {"base": dict(ARM), "hyp": dict(ARM)},
         "primary": {"kind": "superiority", "expected_gain": 0.05},
+        "secondary": {"tokens": {"margin": 0.1}, "wall_s": {"margin": 0.1}},
     }
     s.update(over)
     return s
 
 
-def run(task, arm, outcome, seed=1, model="m", split=H):
-    return {
+def run(task, arm, outcome, seed=1, model="m", split=H, cost=1.0):
+    r = {
         "key": {
             "core_tree": "b" * 40,
             "hypothesis": "baseline" if arm == "base" else "h",
@@ -50,9 +51,12 @@ def run(task, arm, outcome, seed=1, model="m", split=H):
             "axioms": "pass" if outcome == "solved" else "n/a",
         },
     }
+    if outcome == "solved" and cost is not None:
+        r["cost"] = {"tokens": 1000 * cost, "wall_s": 60 * cost}
+    return r
 
 
-def paired(b, c, both, neither):
+def paired(b, c, both, neither, hyp_cost=1.0):
     """runs where the hypothesis alone solves b problems, the baseline alone c, both `both`, neither `neither`"""
     out, i = [], 0
     for kind, count in (("b", b), ("c", c), ("both", both), ("neither", neither)):
@@ -61,7 +65,7 @@ def paired(b, c, both, neither):
             t = f"p{i}"
             base = "solved" if kind in ("c", "both") else "unsolved"
             hyp = "solved" if kind in ("b", "both") else "unsolved"
-            out += [run(t, "base", base), run(t, "hyp", hyp)]
+            out += [run(t, "base", base, cost=1 + 0.01 * i), run(t, "hyp", hyp, cost=hyp_cost * (1 + 0.01 * i))]
     return out
 
 
@@ -110,7 +114,7 @@ class Analyse(unittest.TestCase):
         self.assertEqual((r["b"], r["c"], r["n_paired"]), (10, 1, 40))
         self.assertAlmostEqual(r["D"], 9 / 40)
         self.assertEqual(r["verdict"], "superior")
-        self.assertTrue(r["underpowered"] and not r["promotable_on_primary_alone"])
+        self.assertTrue(r["underpowered"] and not r["promotable"])
 
     def test_a_hypothesis_that_loses_is_not_demonstrated(self):
         r = C.analyse(spec(n=40, primary={"kind": "superiority", "expected_gain": 0.1}), paired(b=1, c=10, both=9, neither=20))
@@ -159,6 +163,42 @@ class Analyse(unittest.TestCase):
         runs[1]["checks"]["kernel"] = "fail"
         r = C.analyse(spec(n=2), runs)
         self.assertEqual(r["verdict"], "invalid-input")
+
+    def test_secondary_margins_are_required_in_the_registration(self):
+        s = spec()
+        del s["secondary"]["wall_s"]
+        self.assertTrue(any("wall_s" in p for p in C.check_spec(s)))
+
+    def test_a_solved_run_without_a_cost_is_refused(self):
+        runs = paired(b=10, c=1, both=9, neither=20)
+        runs[1] = run("p1", "hyp", "solved", cost=None)
+        r = C.analyse(spec(n=40, primary={"kind": "superiority", "expected_gain": 0.1}), runs)
+        self.assertEqual(r["verdict"], "invalid-input")
+        self.assertTrue(any("cost.tokens" in p for p in r["problems"]))
+
+    def test_superior_and_cheaper_is_net_pareto_and_promotable_when_powered(self):
+        s = spec(n=40, primary={"kind": "superiority", "expected_gain": 0.1}, psi=0.3)
+        r = C.analyse(s, paired(b=12, c=0, both=10, neither=18, hyp_cost=0.5))
+        self.assertEqual(r["verdict"], "superior")
+        self.assertTrue(r["secondary"]["tokens"]["better"] and r["secondary"]["tokens"]["noninferior"])
+        self.assertTrue(r["net_pareto"])
+        self.assertEqual(r["promotable"], not r["underpowered"])
+        self.assertTrue(C.analyse({**s, "n": 40}, paired(b=12, c=0, both=10, neither=18, hyp_cost=0.5))["net_pareto"])
+
+    def test_superior_but_far_more_expensive_is_not_net_pareto(self):
+        s = spec(n=40, primary={"kind": "superiority", "expected_gain": 0.1}, psi=0.3)
+        r = C.analyse(s, paired(b=12, c=0, both=10, neither=18, hyp_cost=2.0))
+        self.assertEqual(r["verdict"], "superior")
+        self.assertFalse(r["secondary"]["tokens"]["noninferior"])
+        self.assertFalse(r["net_pareto"])
+
+    def test_non_inferior_needs_a_better_axis_to_be_net_pareto(self):
+        s = spec(n=200, primary={"kind": "noninferiority", "margin": 0.1}, psi=0.1)
+        same = C.analyse(s, paired(b=9, c=11, both=100, neither=80, hyp_cost=1.0))
+        self.assertEqual(same["verdict"], "non-inferior")
+        self.assertFalse(same["net_pareto"])
+        cheaper = C.analyse(s, paired(b=9, c=11, both=100, neither=80, hyp_cost=0.5))
+        self.assertTrue(cheaper["net_pareto"])
 
     def test_the_cli_round_trip(self):
         with tempfile.TemporaryDirectory() as d:

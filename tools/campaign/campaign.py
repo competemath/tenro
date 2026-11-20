@@ -11,7 +11,8 @@ Nothing here runs a prover (the owner's runs write RUNS.jsonl, tools/harness/rec
    "strata": ["post-cutoff", "dependency-ablation", "cross-domain"], "psi": discordant fraction the size was chosen for (0.20 until a pilot measures it),
    "baseline": "arm name", "hypothesis": "arm name",
    "arms": {name: {"model", "turn_cap", "sample_budget"}},                       identical in every arm (gate 5)
-   "primary": {"kind": "superiority", "expected_gain": 0.05} or {"kind": "noninferiority", "margin": 0.05}}
+   "primary": {"kind": "superiority", "expected_gain": 0.05} or {"kind": "noninferiority", "margin": 0.05},
+   "secondary": {"tokens": {"margin": 0.1}, "wall_s": {"margin": 0.1}}}
 
 Decisions, fixed here and not in a campaign:
   - a problem is SOLVED in an arm if any attempt of that arm solved it (records.py already refuses a `solved` that failed a check), UNSOLVED if an attempt ran and none solved it, and has NO RESULT
@@ -19,7 +20,9 @@ Decisions, fixed here and not in a campaign:
   - the result is read once: unless exactly `n` problems have a result in both arms the verdict is `incomplete` and no number is computed (no peeking, no stopping rule).
   - a campaign whose `n` is below what its registered claim needs (eval/power.py, at `psi`) is `underpowered`: it may be read to learn and can never promote.
   - superiority: D > 0 and the two-sided exact McNemar p < 0.05. Non-inferiority: the one-sided test of D > -margin at 0.05 with the normal approximation eval/power.py uses (variance (psi - D^2) / n).
-  - `promotable_on_primary_alone` says nothing about the other axes: net Pareto improvement (protocol section 2) also needs the secondary axes, which this tool does not read.
+  - the secondary axes (tokens and wall time of a solved problem: the cheapest solving attempt of each arm, over problems BOTH arms solved) are tested by tools/campaign/secondary.py with the margins of the registration
+    (`"secondary": {"tokens": {"margin": 0.1}, "wall_s": {"margin": 0.1}}`, the relative increase accepted); every solved run carries `"cost": {"tokens": ..., "wall_s": ...}`.
+    `net_pareto` is the rule of protocol section 2; `promotable` is `net_pareto` and not underpowered. The load axis (gate 1) is a property of the library, not of a campaign, and is not read here.
 """
 
 from __future__ import annotations
@@ -36,10 +39,12 @@ sys.path.insert(0, str(ROOT / "tools" / "harness"))
 sys.path.insert(0, str(ROOT / "tools" / "common"))
 import power  # noqa: E402
 import records  # noqa: E402
+import secondary  # noqa: E402
 from util import read_jsonl  # noqa: E402
 
 REQUIRED_STRATA = ("post-cutoff", "dependency-ablation", "cross-domain")
 ARM_KEYS = ("model", "turn_cap", "sample_budget")
+AXES = ("tokens", "wall_s")
 MAX_DROPPED = 0.01
 ALPHA = 0.05
 
@@ -97,6 +102,13 @@ def check_spec(spec: dict, protocol_hash: str | None = None) -> list[str]:
             shapes.append({k: a[k] for k in ARM_KEYS})
     if shapes and any(s != shapes[0] for s in shapes):
         p.append("every arm must have the same model, turn_cap and sample_budget (gate 5)")
+    sec = spec.get("secondary", {})
+    for ax in AXES:
+        m = sec.get(ax, {}).get("margin") if isinstance(sec, dict) and isinstance(sec.get(ax), dict) else None
+        if not isinstance(m, int | float) or isinstance(m, bool) or m <= 0:
+            p.append(
+                f'secondary.{ax}.margin must be a positive number (the relative cost increase accepted: 0.10 = 10%), e.g. "secondary": {{"tokens": {{"margin": 0.1}}, "wall_s": {{"margin": 0.1}}}}'
+            )
     need = needed_n(spec)
     if need is None:
         p.append(
@@ -128,6 +140,37 @@ def outcomes(runs: list[dict], spec: dict) -> dict[str, dict[str, str]]:
     return res
 
 
+def costs(runs: list[dict], spec: dict) -> tuple[dict[str, dict[str, dict[str, float]]], list[str]]:
+    """arm -> axis -> task -> the cost of the cheapest solving attempt, and the solved runs that do not report a cost axis"""
+    out: dict[str, dict[str, dict[str, float]]] = {a: {ax: {} for ax in AXES} for a in (spec["baseline"], spec["hypothesis"])}
+    missing = []
+    for i, r in enumerate(runs, 1):
+        arm, task = r["arm"]["name"], r["task"]["id"]
+        if (
+            arm not in out
+            or r["outcome"] != "solved"
+            or r["key"]["split"] != spec["split"]
+            or r["key"]["model"] != spec["arms"][arm]["model"]
+        ):
+            continue
+        for ax in AXES:
+            v = r.get("cost", {}).get(ax)
+            if v is None:
+                missing.append(f"run {i}: a solved run of {arm!r} needs cost.{ax} (secondary axes are registered)")
+            else:
+                out[arm][ax][task] = min(v, out[arm][ax].get(task, v))
+    return out, missing
+
+
+def net_pareto(verdict: str, axes: dict[str, dict]) -> bool:
+    """protocol section 2: superior with every other axis non-inferior, or non-inferior with at least one other axis significantly better"""
+    if verdict == "superior":
+        return all(a["noninferior"] for a in axes.values())
+    if verdict == "non-inferior":
+        return any(a["better"] for a in axes.values())
+    return False
+
+
 def one_sided_noninferior_p(b: int, c: int, n: int, margin: float) -> float:
     """p of H0: D <= -margin against D > -margin, normal approximation with variance (psi - D^2) / n"""
     d, psi = (b - c) / n, (b + c) / n
@@ -138,6 +181,9 @@ def one_sided_noninferior_p(b: int, c: int, n: int, margin: float) -> float:
 
 def analyse(spec: dict, runs: list[dict]) -> dict:
     problems = check_spec(spec) + records.validate(runs)
+    if not problems:
+        cost, missing = costs(runs, spec)
+        problems += missing
     if problems:
         return {"verdict": "invalid-input", "problems": problems}
     res = outcomes(runs, spec)
@@ -169,7 +215,11 @@ def analyse(spec: dict, runs: list[dict]) -> dict:
     else:
         out["noninferiority_p"] = one_sided_noninferior_p(b, c, n, prim["margin"])
         out["verdict"] = "non-inferior" if out["noninferiority_p"] < ALPHA else "not-demonstrated"
-    out["promotable_on_primary_alone"] = out["verdict"] in ("superior", "non-inferior") and not out["underpowered"]
+    out["secondary"] = {
+        ax: secondary.axis(cost[spec["baseline"]][ax], cost[spec["hypothesis"]][ax], spec["secondary"][ax]["margin"]) for ax in AXES
+    }
+    out["net_pareto"] = net_pareto(out["verdict"], out["secondary"])
+    out["promotable"] = out["net_pareto"] and not out["underpowered"]
     return out
 
 

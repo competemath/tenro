@@ -14,4 +14,6 @@ Nothing in Tenro runs a prover. A campaign is the owner's runs, recorded in a fo
 - `campaign.py analyse SPEC.json RUNS.jsonl`: the paired result (`b`, `c`, `n`, `psi`, `D`, exact McNemar p, the primary verdict), or `incomplete` (not every problem has a result in both arms: nothing is computed), `invalid` (more than 1% of the problems have no result: the harness is being measured), `invalid-input` (a malformed run or registration).
 - `records.py summarise RUNS.jsonl --out DIR` writes the harness error rate and the two-sided validity that gate 4 reads; `register --out DIR` writes the `campaign.json` that gate 5 reads.
 
-**Not covered yet**: the secondary axes (cost, load) that a net Pareto improvement also needs; `promotable_on_primary_alone` says so in its name.
+**The cost axes.** The registration lists a margin for `tokens` and `wall_s` (the relative increase accepted, 0.10 = 10%); every solved run carries `"cost": {"tokens": ..., "wall_s": ...}`. `analyse` then tests both over the problems both arms solved
+(`tools/campaign/secondary.py`: paired Wilcoxon on the log cost ratio, exact up to 20 differing pairs) and applies the protocol's rule: `net_pareto` is superior with every cost axis non-inferior, or non-inferior with at least one significantly cheaper;
+`promotable` is that and not underpowered. **Not covered**: the load axis (gate 1) is a property of the library and is read from `perf-budget.toml`, not from a campaign.

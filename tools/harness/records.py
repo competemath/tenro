@@ -10,6 +10,7 @@ A RUN is one attempt of one system on one problem (eval/protocol.md): the harnes
   arm       the system the run belongs to (e.g. tengai, mathlib, baseline, a hypothesis id), turn_cap, sample_budget
   outcome   solved | unsolved | infra_error     (infra_error: the harness or the runner failed, not the prover; such a run says nothing about the system)
   checks    {"tamper": pass|fail, "kernel": pass|fail|n/a, "axioms": pass|fail|n/a}   a solved run needs all three pass; a tamper `fail` makes the outcome `unsolved`
+  cost      optional, positive numbers {"tokens", "wall_s"}: what the attempt used (a campaign with secondary axes needs it on every solved run)
   validity  the two-sided check of the TASK, written once per task by the harness, not per run: {"accepts_reference": bool, "rejects_mutant": bool}: the task's reference proof is accepted AND a
             known-wrong submission is rejected (a task that cannot tell right from wrong is invalid in one direction and does not count).
 Parity (gate 5): all arms of one comparison share model, turn_cap and sample_budget; `summarise` reports differences instead of hiding them.
@@ -53,6 +54,13 @@ def check_run(r: dict) -> list[str]:
     outcome, checks = r.get("outcome"), r.get("checks", {})
     if outcome not in OUTCOMES:
         p.append(f"outcome must be one of {OUTCOMES}")
+    cost = r.get("cost")
+    if cost is not None and (
+        not isinstance(cost, dict)
+        or any(not isinstance(v, int | float) or isinstance(v, bool) or v <= 0 for v in cost.values())
+        or not {"tokens", "wall_s"} >= set(cost)
+    ):
+        p.append("cost, if present, is {tokens, wall_s} with positive numbers")
     if outcome == "solved" and not (checks.get("tamper") == "pass" and checks.get("kernel") == "pass" and checks.get("axioms") == "pass"):
         p.append("a solved run needs the tamper, kernel and axioms checks to pass")
     if checks.get("tamper") == "fail" and outcome == "solved":
