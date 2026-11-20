@@ -97,6 +97,12 @@ jobs:
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty.json"
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/check.lean" | tee "$RUNNER_TEMP/import-sample.json"
           lake env lean "$RUNNER_TEMP/check.lean" | head -12
+      - name: "The statements are the statements (the promotion lens: isnad ids of the replayed theorems against Tengoku's)"
+        run: |
+          core_path="$(cd "$TOOLS" && lake env printenv LEAN_PATH)"
+          (cd "$TOOLS" && LEAN_PATH="$RUNNER_TEMP/out:$core_path" "$TOOLS/.lake/build/bin/tengoku-isnad" --module TengaiData.Sample) > "$RUNNER_TEMP/isnad-replayed.tsv"
+          wc -l "$RUNNER_TEMP/isnad-replayed.tsv"
+          python3 tools/promote/compare_ids.py --isnad-py "$TOOLS/scripts/isnad.py" --names "$RUNNER_TEMP/names.txt" --source "$RUNNER_TEMP/isnad.tsv" --replayed "$RUNNER_TEMP/isnad-replayed.tsv" --out "$RUNNER_TEMP/statement-ids.json" || echo "statement ids differ" > "$RUNNER_TEMP/statement-ids.failed"
       - name: The built module checked again by nanoda (an independent checker, shares no code with Lean; invariant I1)
         run: |
           git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
@@ -140,6 +146,8 @@ jobs:
           print("## transplant of a sample of " + os.environ["LIB"])
           print(f"theorems {os.environ['COUNT']}, seed {os.environ['SEED']}; constants added {stats['added']}, already in Lean core {stats['skipped']}, inductive groups {stats['inductives']}")
           print(f"export {export/1e6:.1f} MB; olean {olean/1e6:.1f} MB")
+          ids = json.load(open(f"{t}/statement-ids.json"))
+          print(f"statement ids (promotion lens): {ids['equal']} of {ids['names']} equal, {len(ids['different'])} different, {len(ids['missing_in_replayed'])} missing in the replayed module")
           import re
           checked = re.findall(r"Checked (\d+) declarations with no errors", open(f"{t}/nanoda.out").read())
           print(f"independent check (nanoda): {open(f'{t}/nanoda.status').read().strip()}; " + (f"{checked[-1]} declarations checked" if checked else "no success line"))
@@ -156,6 +164,9 @@ jobs:
             ${{ runner.temp }}/import-sample.json
             ${{ runner.temp }}/nanoda.out
             ${{ runner.temp }}/nanoda.status
+            ${{ runner.temp }}/statement-ids.json
           retention-days: 30
-      - name: The independent check must have passed
-        run: test "$(cat "$RUNNER_TEMP/nanoda.status")" = ok
+      - name: The independent check and the statement ids must have passed
+        run: |
+          test "$(cat "$RUNNER_TEMP/nanoda.status")" = ok
+          test ! -e "$RUNNER_TEMP/statement-ids.failed"
