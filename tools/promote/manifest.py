@@ -72,7 +72,10 @@ def build(d: Path, export: Path | None, olean: Path | None, pins: dict[str, str]
         else []
     )
     names = [r["name"] for r in sample]
-    stats = read_json(d / "replay-stats.json")
+    raw = read_json(d / "replay-stats.json")
+    # tengai >= v0.0.10 writes {"replay": {...}, "ext": {...}|null}; before that the counters were the whole object
+    stats = (raw.get("replay", raw) if raw else None) or None
+    ext = raw.get("ext") if raw else None
     empty, with_sample = read_json(d / "import-empty.json"), read_json(d / "import-sample.json")
     ids = read_json(d / "statement-ids.json")
     nanoda_status = (d / "nanoda.status").read_text(encoding="utf-8").strip() if (d / "nanoda.status").exists() else None
@@ -88,6 +91,7 @@ def build(d: Path, export: Path | None, olean: Path | None, pins: dict[str, str]
         "libraries": sorted({r["library"] for r in sample}),
         "theorems": sorted(sample, key=lambda r: r["name"]),
         "replay": stats,
+        "extensions": ext,
         "artifact": {
             "export": sha256_and_sizes(export) if export else None,
             "olean": sha256_and_sizes(olean) if olean else None,

@@ -136,6 +136,23 @@ class Manifest(unittest.TestCase):
             self.assertEqual(m["checks"], {"kernel": None, "nanoda": None, "statement_ids": None, "axioms": None, "cold_import_s": None})
             self.assertEqual(m["artifact"], {"export": None, "olean": None})
 
+    def test_the_new_stats_shape_with_extensions(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "sample.jsonl").write_text(json.dumps({"name": "A.t1", "id": "i1", "library": "A", "module": "m"}) + "\n")
+            (d / "replay-stats.json").write_text(
+                json.dumps(
+                    {
+                        "replay": {"added": 7, "skipped": 1, "inductives": 0},
+                        "ext": {"instances": 3, "classes": 1, "reducibility": 2, "projections": 4},
+                    }
+                )
+            )
+            m = M.build(d, None, None, {})
+            self.assertEqual(m["replay"], {"added": 7, "skipped": 1, "inductives": 0})
+            self.assertEqual(m["extensions"]["instances"], 3)
+            self.assertEqual(m["checks"]["kernel"], "accepted")
+
     def test_a_forbidden_axiom_is_reported(self):
         r = M.axioms_check("'A.t1' depends on axioms: [propext, sorryAx]\n", ["A.t1"])
         self.assertFalse(r["standard_only"])
