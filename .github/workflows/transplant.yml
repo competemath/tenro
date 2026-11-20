@@ -161,6 +161,19 @@ jobs:
             --pin "tengoku=$(tr -d '[:space:]' < tengoku.pin)" --pin "core_tag=$(python3 -c 'import json;print(json.load(open("core.lock"))["tag"])')" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "nanoda=$NANODA_COMMIT" \
             --pin "candidates_run=${CAND_RUN:-none}" --pin "seed=$SEED" --pin "count=$COUNT"
           python3 -c 'import json;m=json.load(open("'"$RUNNER_TEMP"'/manifest.json"));o=m["artifact"]["olean"];print("olean",o["bytes"],"gzip",o["gzip_bytes"])'
+      - name: The snapshot - packed, compressed, unpacked and verified again, and imported from the unpacked copy
+        run: |
+          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/out" --manifest "$RUNNER_TEMP/manifest.json" --out "$RUNNER_TEMP/snapshot.tar"
+          zstd -T0 -12 --long=27 -q -f "$RUNNER_TEMP/snapshot.tar" -o "$RUNNER_TEMP/snapshot.tar.zst"
+          sum="$(sha256sum "$RUNNER_TEMP/snapshot.tar.zst" | cut -d' ' -f1)"
+          echo "$sum  snapshot.tar.zst" > "$RUNNER_TEMP/snapshot.sha256"
+          ls -l "$RUNNER_TEMP/snapshot.tar.zst"
+          python3 tools/release/pack.py verify "$RUNNER_TEMP/snapshot.tar.zst" --sha256 "$sum" --into "$RUNNER_TEMP/unpacked"
+          # what a prover environment does with it: the unpacked directory on LEAN_PATH, one import
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          LEAN_PATH="$RUNNER_TEMP/unpacked:$core_path" lake env lean "$RUNNER_TEMP/import-only.lean"
+          echo "the snapshot imports from its unpacked copy"
       - name: Summary
         run: |
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
@@ -174,7 +187,8 @@ jobs:
           print("## transplant of a sample of " + os.environ["LIB"] + (f" (candidates run {os.environ['CAND_RUN']})" if os.environ.get("CAND_RUN") else ""))
           print(f"theorems {os.environ['COUNT']}, seed {os.environ['SEED']}; constants added {stats['added']}, already in Lean core {stats['skipped']}, inductive groups {stats['inductives']}")
           zst = int(open(f"{t}/olean-zstd-bytes.txt").read().split()[0])
-          print(f"export {export/1e6:.1f} MB; olean {olean/1e6:.1f} MB (zstd -3: {zst/1e6:.1f} MB)")
+          snap = os.path.getsize(f"{t}/snapshot.tar.zst")
+          print(f"export {export/1e6:.1f} MB; olean {olean/1e6:.1f} MB (zstd -3: {zst/1e6:.1f} MB); snapshot (tar + manifest, zstd -12 --long): {snap/1e6:.1f} MB, sha256 {open(f'{t}/snapshot.sha256').read().split()[0][:16]}")
           m = json.load(open(f"{t}/manifest.json"))
           print(f"libraries in the sample: {', '.join(m['libraries']) or 'one library by isnad'}; gzip -6: {m['artifact']['olean']['gzip_bytes']/1e6:.1f} MB")
           ids = json.load(open(f"{t}/statement-ids.json"))
@@ -198,9 +212,11 @@ jobs:
             ${{ runner.temp }}/nanoda.status
             ${{ runner.temp }}/statement-ids.json
             ${{ runner.temp }}/manifest.json
+            ${{ runner.temp }}/snapshot.tar.zst
+            ${{ runner.temp }}/snapshot.sha256
             ${{ runner.temp }}/sample.jsonl
             ${{ runner.temp }}/axioms.txt
-          retention-days: 30
+          retention-days: 14
       - name: The independent check, the statement ids and the axioms must have passed
         run: |
           test "$(cat "$RUNNER_TEMP/nanoda.status")" = ok
