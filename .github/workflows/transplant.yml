@@ -192,7 +192,7 @@ jobs:
           m = json.load(open(f"{t}/manifest.json"))
           print(f"libraries in the sample: {', '.join(m['libraries']) or 'one library by isnad'}; gzip -6: {m['artifact']['olean']['gzip_bytes']/1e6:.1f} MB")
           ids = json.load(open(f"{t}/statement-ids.json"))
-          print(f"statement ids (promotion lens): {ids['equal']} of {ids['names']} equal, {len(ids['different'])} different, {len(ids['missing_in_replayed'])} missing in the replayed module")
+          print(f"statement ids (promotion lens): {ids['equal']} of {ids['names']} equal, {len(ids.get('drift', []))} drift (same hash, other hypothesis count or size class), {len(ids['different'])} different, {len(ids['missing_in_replayed'])} missing in the replayed module")
           import re
           checked = re.findall(r"Checked (\d+) declarations with no errors", open(f"{t}/nanoda.out").read())
           print(f"independent check (nanoda): {open(f'{t}/nanoda.status').read().strip()}; " + (f"{checked[-1]} declarations checked" if checked else "no success line"))

@@ -97,7 +97,9 @@ def build(d: Path, export: Path | None, olean: Path | None, pins: dict[str, str]
             "nanoda": {"status": nanoda_status, "declarations": int(declared[-1])}
             if nanoda_status and declared
             else ({"status": nanoda_status, "declarations": None} if nanoda_status else None),
-            "statement_ids": None if ids is None else {"names": ids["names"], "equal": ids["equal"], "ok": ids["ok"]},
+            "statement_ids": None
+            if ids is None
+            else {"names": ids["names"], "equal": ids["equal"], "drift": [d["name"] for d in ids.get("drift", [])], "ok": ids["ok"]},
             "axioms": axioms_check(axioms_text, names),
             "cold_import_s": None
             if not (empty and with_sample)
