@@ -142,6 +142,18 @@ class Manifest(unittest.TestCase):
         self.assertEqual(r["axioms"], ["propext", "sorryAx"])
         self.assertFalse(M.axioms_check("'A.t1' does not depend on any axioms\n", ["A.t1", "A.t2"])["all_printed"])
 
+    def test_names_with_apostrophes_and_wrapped_output(self):
+        text = (
+            "'Foo.bar'' depends on axioms: [propext, Classical.choice, Quot.sound]\n"
+            "'Azurite.A.very_long_name_that_lean_wraps'\ndepends on axioms: [propext,\n Classical.choice,\n Quot.sound]\n"
+            "'Baz.q' does not depend on any axioms\n"
+        )
+        r = M.axioms_check(text, ["Foo.bar'", "Azurite.A.very_long_name_that_lean_wraps", "Baz.q"])
+        self.assertEqual(r["theorems"], 3)
+        self.assertTrue(r["all_printed"])
+        self.assertTrue(r["standard_only"])
+        self.assertEqual(r["axioms"], ["Classical.choice", "Quot.sound", "propext"])
+
     def test_deterministic_output(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)

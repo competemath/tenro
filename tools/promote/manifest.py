@@ -53,8 +53,9 @@ def axioms_check(text: str, names: list[str]) -> dict | None:
     if not text.strip():
         return None
     seen: dict[str, set[str]] = {}
-    for m in re.finditer(r"'([^']+)' (?:depends on axioms: \[([^\]]*)\]|does not depend on any axioms)", text):
-        seen[m.group(1)] = {a.strip() for a in (m.group(2) or "").split(",") if a.strip()}
+    # a name may contain `'` and Lean wraps a long line: the name runs to the last quote before `depends`/`does`, and the gap may be a newline
+    for m in re.finditer(r"'(.+?)'\s+(?:depends on axioms:\s*\[([^\]]*)\]|does not depend on any axioms)", text, re.S):
+        seen[m.group(1).strip()] = {a.strip() for a in (m.group(2) or "").replace("\n", " ").split(",") if a.strip()}
     union = sorted(set().union(*seen.values())) if seen else []
     return {
         "theorems": len(seen),

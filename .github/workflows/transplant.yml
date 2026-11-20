@@ -108,7 +108,9 @@ jobs:
           printf 'import Init\n' > "$RUNNER_TEMP/empty.lean"
           { printf 'import TengaiData.Sample\n'; while read -r n; do printf '#print axioms %s\n' "$n"; done < "$RUNNER_TEMP/names.txt"; } > "$RUNNER_TEMP/check.lean"
           python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty.json"
-          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/check.lean" | tee "$RUNNER_TEMP/import-sample.json"
+          # the import alone: a file with nothing else in it (the axiom printing below does real work per theorem and is not part of the load)
+          printf 'import TengaiData.Sample\n' > "$RUNNER_TEMP/import-only.lean"
+          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/import-only.lean" | tee "$RUNNER_TEMP/import-sample.json"
           lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/axioms.txt"
           head -4 "$RUNNER_TEMP/axioms.txt"
       - name: "The statements are the statements (the promotion lens: isnad ids of the replayed theorems against Tengoku's)"
@@ -210,9 +212,9 @@ jobs:
           text = open(f"{t}/axioms.txt").read()
           allowed = {"propext", "Classical.choice", "Quot.sound"}
           seen = set()
-          for m in re.finditer(r"'([^']+)' (depends on axioms: \[([^\]]*)\]|does not depend on any axioms)", text):
-              seen.add(m.group(1))
-              used = {a.strip() for a in (m.group(3) or "").split(",") if a.strip()}
+          for m in re.finditer(r"'(.+?)'\s+(depends on axioms:\s*\[([^\]]*)\]|does not depend on any axioms)", text, re.S):
+              seen.add(m.group(1).strip())
+              used = {a.strip() for a in (m.group(3) or "").replace("\n", " ").split(",") if a.strip()}
               assert used <= allowed, f"{m.group(1)} depends on {sorted(used - allowed)}"
           assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
           print(f"axioms: {len(names)} theorems, all within {sorted(allowed)}")
