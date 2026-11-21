@@ -109,8 +109,11 @@ jobs:
         run: |
           mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
           mapfile -t names < "$RUNNER_TEMP/names.txt"
-          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson"
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson" 2> "$RUNNER_TEMP/export.err"
           wc -lc "$RUNNER_TEMP/sample.ndjson"
+          # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (a manifest name need not be the tree's name: Physlib): taken out of the sample, counted, never silent
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/promote/missing.py --err "$RUNNER_TEMP/export.err" --names "$RUNNER_TEMP/names.txt" $([ -s "$RUNNER_TEMP/sample.jsonl" ] && echo --sample "$RUNNER_TEMP/sample.jsonl") --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Layers: the plan (which layer each constant of the sample belongs to)"
         if: env.LAYERS == 'true'
         continue-on-error: true   # the planner reads a 2 GB export in Python: if it fails, the one-module pipeline below still runs and the layer steps say why they cannot
@@ -296,6 +299,7 @@ jobs:
             ${{ runner.temp }}/snapshot.tar.zst
             ${{ runner.temp }}/snapshot.sha256
             ${{ runner.temp }}/sample.jsonl
+            ${{ runner.temp }}/missing-names.txt
             ${{ runner.temp }}/axioms.txt
           retention-days: 14
       - name: The independent check, the statement ids and the axioms must have passed
