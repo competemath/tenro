@@ -58,3 +58,25 @@ and are taken out of the sample and counted (`tools/promote/missing.py`).
 * **Axioms:** all 4,778 theorems resolve from the layers and rest on `propext`, `Classical.choice` and `Quot.sound` only.
 * **Duplicates (`compare_ids.py`):** of 4,750 replayed theorems 4,743 distinct statements: 7 statements are stated twice (14 theorems), so 7 theorems (0.15 %) would be redundant under one proof per statement id. A sample of 300 theorems a library says little about the duplicates inside a library: the sample is too thin to meet them.
 * **Not compared:** statement ids against Tengoku's (0 of 4,778: a manifest sample carries no source ids; the one-module runs above compare them).
+
+### The canonical form of what was promoted (the same wide sample; run 44943029972, tengai v0.0.15)
+
+`tengai-canon` over every layer (a step of 7 seconds; `tools/promote/canon_report.py`; a measurement, never a gate). A replay carries Tengoku's statements as they are, so the content is as canonical as its source. Of the 183,763 constants the layers added, 75,035 violations of 7 rules fall on 69,871 declarations (38.0 %):
+
+| rule | declarations |
+|---|---:|
+| `name-theorem` (last component not snake_case) | 44,944 |
+| `def-irreducible` (definition not `@[irreducible]`, I5) | 18,919 |
+| `global-instance` (I4) | 10,170 |
+| `gt-ge` (I2) | 439 |
+| `nat-succ` (I2) | 428 |
+| `not-eq` (I2) | 84 |
+| `name-type` (not UpperCamelCase) | 51 |
+
+* **I2, the statement form** (`>` and `≥`, `¬ a = b`, `Nat.succ n`): 951 declarations, 0.5 % of the constants. The foundation is already nearly canonical, so a term-level canonicalisation lens (feasible: the three rewrites are definitional, so the same proof is checked against the new type) would change 951 statements; it is not built.
+* **`name-theorem`** is the large count and is not a defect of the content: the rule is strict snake_case, Mathlib writes `aestronglyMeasurable` (lowerCamelCase where a name refers to a type). Carried names are the upstream's and are not renamed.
+* **I4:** the 10,170 global instances are about the 10,197 instances the replay carries; the algebraic hierarchy of the foundation needs them global. The rule is about what Tengai authors, not about a replayed foundation.
+* **I5:** 18,919 definitions are not irreducible: I5 is not applied to promoted content. Applying it (an irreducibility entry for every definition at replay) changes what a prover can unfold, which is a hypothesis to be measured on proving, not something this report answers.
+* **Not measured:** how many of the 4,778 sampled theorems themselves (against their closure) break a rule; any effect on proving.
+
+The same code on another runner took 20 min for the layers step against 14 min 5 s in run 44937592081 (the foundation 4 min 07 s against 3 min 06 s, the 15 small layers 5 min 02 s against 3 min 40 s): times vary by about a third between runs, sizes and counts do not.
