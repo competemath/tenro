@@ -45,8 +45,9 @@ jobs:
       - name: The file compiled against Lean core, and exported both ways
         run: |
           mkdir -p "$RUNNER_TEMP/repro"
+          cp tests/fixtures/statements/Repro.lean "$RUNNER_TEMP/repro/Repro.lean"
           cd core
-          lake env lean -o "$RUNNER_TEMP/repro/Repro.olean" "$GITHUB_WORKSPACE/tests/fixtures/statements/Repro.lean"
+          lake env lean --root="$RUNNER_TEMP/repro" -o "$RUNNER_TEMP/repro/Repro.olean" "$RUNNER_TEMP/repro/Repro.lean"
           core_path="$(lake env printenv LEAN_PATH)"
           export LEAN_PATH="$RUNNER_TEMP/repro:$core_path"
           read -ra root_names <<< "$ROOTS"
