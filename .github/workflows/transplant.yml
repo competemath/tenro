@@ -100,7 +100,7 @@ jobs:
           wc -lc "$RUNNER_TEMP/sample.ndjson"
       - name: tengai-replay from core/ (kernel replay into Lean core alone, then the extension entries put back)
         run: |
-          (cd core && lake build tengai-replay tengai-extinfo 2>&1 | tail -3)
+          (cd core && lake build tengai-replay tengai-extinfo tengai-typeinfo 2>&1 | tail -3)
           mkdir -p "$RUNNER_TEMP/out"
           replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
           ext_args=()
@@ -150,6 +150,23 @@ jobs:
           wc -l "$RUNNER_TEMP/isnad-replayed.tsv"
           if [ -s "$RUNNER_TEMP/sample.jsonl" ]; then src=(--source-jsonl "$RUNNER_TEMP/sample.jsonl"); else src=(--source "$RUNNER_TEMP/isnad.tsv"); fi
           python3 tools/promote/compare_ids.py --isnad-py "$TOOLS/scripts/isnad.py" --names "$RUNNER_TEMP/names.txt" "${src[@]}" --replayed "$RUNNER_TEMP/isnad-replayed.tsv" --out "$RUNNER_TEMP/statement-ids.json" || echo "statement ids differ" > "$RUNNER_TEMP/statement-ids.failed"
+      - name: "Where a statement that drifted differs (its type, read in Tengoku's environment and in the replayed module)"
+        run: |
+          # compare_ids reports a statement whose id differs only in its size class or hypothesis count as drift; this says which part of the expression differs (tools/promote/typeinfo_diff.py). A diagnosis: it fails nothing.
+          python3 - <<'PY'
+          import json, os
+          rep = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "statement-ids.json")))
+          names = [r["name"] for r in rep.get("drift", []) + rep.get("different", [])][:40]
+          open(os.path.join(os.environ["RUNNER_TEMP"], "drift-names.jsonl"), "w").write("".join(json.dumps(n.split(".")) + "\n" for n in names))
+          print(f"{len(names)} statement(s) to read")
+          PY
+          if [ -s "$RUNNER_TEMP/drift-names.jsonl" ]; then
+            typeinfo="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-typeinfo"
+            (cd .tengoku && lake env "$typeinfo" "$RUNNER_TEMP/drift-names.jsonl" Tengoku.All) > "$RUNNER_TEMP/typeinfo-source.jsonl"
+            core_path="$(cd core && lake env printenv LEAN_PATH)"
+            LEAN_PATH="$RUNNER_TEMP/out:$core_path" "$typeinfo" "$RUNNER_TEMP/drift-names.jsonl" TengaiData.Sample > "$RUNNER_TEMP/typeinfo-replayed.jsonl"
+            python3 tools/promote/typeinfo_diff.py "$RUNNER_TEMP/typeinfo-source.jsonl" "$RUNNER_TEMP/typeinfo-replayed.jsonl" --out "$RUNNER_TEMP/typeinfo-diff.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: The built module checked again by nanoda (an independent checker, shares no code with Lean; invariant I1)
         run: |
           git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
