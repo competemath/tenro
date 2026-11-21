@@ -2,6 +2,7 @@
 """manifest.py - the record of one transplant: what went in, from which pins, and what was checked. Standard library only.
 
   manifest.py --dir DIR --out MANIFEST.json --export EXPORT.ndjson --olean MODULE.olean [--pin KEY=VALUE ...]
+  manifest.py layers --dir DIR --layered LAYERED_DIR --out MANIFEST.json [--pin KEY=VALUE ...]        schema 2: a promotion in layers (the foundation and one layer per topic)
 
 DIR holds what `.github/workflows/transplant.yml` leaves behind: sample.jsonl (name, id, library, module of every theorem), replay-stats.json, import-empty.json, import-sample.json, nanoda.out,
 nanoda.status, statement-ids.json, axioms.txt. The manifest has no clock: the same inputs give the same file, so it can be committed and diffed. It states the pins (Tengoku commit, tengai tag,
@@ -122,7 +123,117 @@ def build(d: Path, export: Path | None, olean: Path | None, pins: dict[str, str]
     }
 
 
+def layer_path(layered: Path, module: str) -> Path:
+    return layered / (module.replace(".", "/") + ".olean")
+
+
+def build_layers(d: Path, layered: Path, pins: dict[str, str]) -> dict:
+    """the record of a promotion in layers (schema 2): every layer with what it imports, what it holds, what its replay added and the hash and size of its olean; the checks of the whole (independent kernel over all
+    the layers, statement ids, axioms, what a session loads). A layer whose file is missing is an error, a check that did not run is null."""
+    plan = json.loads((d / "layers" / "layers.json").read_text(encoding="utf-8"))
+    sample = [json.loads(ln) for ln in (d / "sample.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+    names = [r["name"] for r in sample]
+    stats_lines = (
+        [json.loads(ln) for ln in (d / "layer-stats.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if (d / "layer-stats.jsonl").exists()
+        else []
+    )
+    if stats_lines and len(stats_lines) != len(plan["layers"]):
+        raise SystemExit(f"manifest: {len(plan['layers'])} layers planned, the replay left statistics for {len(stats_lines)}")
+    layers = []
+    for i, layer in enumerate(plan["layers"]):
+        path = layer_path(layered, layer["module"])
+        if not path.is_file():
+            raise SystemExit(f"manifest: the olean of {layer['module']} is not at {path}")
+        topic = layer["topic"]
+        layers.append(
+            {
+                "module": layer["module"],
+                "topic": topic,
+                "imports": layer["imports"],
+                "units": layer["units"],
+                "constants": layer["constants"],
+                "theorems": plan["topics"][topic]["theorems"] if topic else 0,
+                "replay": stats_lines[i].get("replay") if stats_lines else None,
+                "extensions": stats_lines[i].get("ext") if stats_lines else None,
+                "olean": sha256_and_sizes(path),
+            }
+        )
+    status = (d / "nanoda-layers.status").read_text(encoding="utf-8").strip() if (d / "nanoda-layers.status").exists() else None
+    declared = (
+        re.findall(r"Checked (\d+) declarations with no errors", (d / "nanoda-layers.out").read_text(encoding="utf-8"))
+        if (d / "nanoda-layers.out").exists()
+        else []
+    )
+    ids = read_json(d / "statement-ids-layers.json")
+    load = read_json(d / "layers-load.json")
+    axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
+    return {
+        "schema": 2,
+        "pins": dict(sorted(pins.items())),
+        "libraries": sorted({r["library"] for r in sample}),
+        "theorems": sorted(sample, key=lambda r: r["name"]),
+        "layers": layers,
+        "totals": {
+            "olean_bytes": sum(x["olean"]["bytes"] for x in layers),
+            "constants_added": sum((x["replay"] or {}).get("added", 0) for x in layers) if stats_lines else None,
+            "theorems": len(sample),
+        },
+        "checks": {
+            "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
+            "nanoda": {"status": status, "declarations": int(declared[-1]) if declared else None} if status else None,
+            "statement_ids": None
+            if ids is None
+            else {
+                "names": ids["names"],
+                "equal": ids["equal"],
+                "drift": [x["name"] for x in ids.get("drift", [])],
+                "no_source_id": ids.get("no_source_id", 0),
+                "ok": ids["ok"],
+            },
+            "axioms": axioms_check(axioms_text, names),
+            "session_load": None
+            if load is None
+            else {
+                "baseline": load.get("empty"),
+                "sets": {
+                    row[0]: {"olean_mb": round(row[1], 1), **{k: row[2][k] for k in ("median", "net_median", "net_min") if k in row[2]}}
+                    for row in load["rows"]
+                    if isinstance(row[2], dict)
+                },
+            },
+        },
+    }
+
+
+def main_layers(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(prog="manifest.py layers")
+    ap.add_argument("--dir", required=True)
+    ap.add_argument("--layered", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--pin", action="append", default=[], help="KEY=VALUE")
+    a = ap.parse_args(argv)
+    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin))
+    with open(a.out, "w", encoding="utf-8") as f:
+        f.write(json.dumps(m, indent=1, sort_keys=True) + "\n")
+    print(
+        json.dumps(
+            {
+                "layers": [x["module"] for x in m["layers"]],
+                "totals": m["totals"],
+                "checks": {k: (v if not isinstance(v, dict) else "…") for k, v in m["checks"].items()},
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "layers":
+        return main_layers(argv[1:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", required=True)
     ap.add_argument("--out", required=True)

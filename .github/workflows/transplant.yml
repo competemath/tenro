@@ -451,6 +451,24 @@ jobs:
           echo "layered modules, independent check (nanoda): $(cat "$RUNNER_TEMP/nanoda-layers.status"); ${checked:-no success line}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-layers-time.txt" || true
           if [ "$(cat "$RUNNER_TEMP/nanoda-layers.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-layers-time.txt"; exit 1; fi
+      - name: "Layers: the record (manifest, schema 2), the snapshot packed, verified and imported from its unpacked copy"
+        if: env.LAYERS == 'true'
+        run: |
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest-layers.json" \
+            --pin "tengoku=$(tr -d '[:space:]' < tengoku.pin)" --pin "core_tag=$(python3 -c 'import json;print(json.load(open("core.lock"))["tag"])')" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "nanoda=$NANODA_COMMIT" \
+            --pin "candidates_run=${CAND_RUN:-none}" --pin "manifests=${MANIFESTS:-false}" --pin "seed=$SEED" --pin "count=$COUNT"
+          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest-layers.json" --out "$RUNNER_TEMP/snapshot-layers.tar"
+          zstd -T0 -12 --long=27 -q -f "$RUNNER_TEMP/snapshot-layers.tar" -o "$RUNNER_TEMP/snapshot-layers.tar.zst"
+          sum="$(sha256sum "$RUNNER_TEMP/snapshot-layers.tar.zst" | cut -d' ' -f1)"
+          echo "$sum  snapshot-layers.tar.zst" > "$RUNNER_TEMP/snapshot-layers.sha256"
+          ls -l "$RUNNER_TEMP/snapshot-layers.tar.zst"
+          python3 tools/release/pack.py verify "$RUNNER_TEMP/snapshot-layers.tar.zst" --sha256 "$sum" --into "$RUNNER_TEMP/unpacked-layers"
+          # what a prover environment does with it: the unpacked directory on LEAN_PATH next to Lean core, every layer imported
+          { while read -r module _; do printf 'import %s\n' "$module"; done < "$RUNNER_TEMP/layer-order.txt"; } > "$RUNNER_TEMP/import-layers.lean"
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          LEAN_PATH="$RUNNER_TEMP/unpacked-layers:$core_path" lake env lean "$RUNNER_TEMP/import-layers.lean"
+          echo "the layered snapshot imports from its unpacked copy: $(ls -l "$RUNNER_TEMP/snapshot-layers.tar.zst" | awk '{print $5}') bytes, sha256 ${sum:0:16}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.LAYERS == 'true'
         with:
@@ -462,4 +480,7 @@ jobs:
             ${{ runner.temp }}/layers-load.md
             ${{ runner.temp }}/statement-ids-layers.json
             ${{ runner.temp }}/layers-axioms.txt
+            ${{ runner.temp }}/manifest-layers.json
+            ${{ runner.temp }}/snapshot-layers.tar.zst
+            ${{ runner.temp }}/snapshot-layers.sha256
           retention-days: 14
