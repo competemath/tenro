@@ -12,7 +12,23 @@ on:
         required: true
         default: "Tengoku.All"
       wide_sample:
-        description: "Also export the wide sample of the transplant runs (16 libraries, 4,800 theorems, seed wide-2) as statements, for a size to set against the snapshot of the same roots: true or false"
+        description: "Also export a sample of the intake theorems as statements (by default the wide sample of the transplant runs: 16 libraries, 4,800 theorems, seed wide-2), for a size to set against the snapshot of the same roots: true or false"
+        required: true
+        default: "true"
+      sample_libraries:
+        description: "The intake libraries of the sample (keys of data/intake, separated by spaces), or all"
+        required: true
+        default: "aintlib compfiles azurite nlalib complexitylib causalean linearhadwiger leancert regularity-lemmata lie-lean formal-mathfin imoshortlist erdos-lean cslib physlib brownian-motion"
+      sample_count:
+        description: "How many theorems the sample takes (more than there are: all of them)"
+        required: true
+        default: "4800"
+      sample_seed:
+        description: "The sample's seed"
+        required: true
+        default: "wide-2"
+      tree:
+        description: "Also export the whole tree as statements (25 minutes and 12 GB of memory for Tengoku.All): true or false"
         required: true
         default: "true"
       replay:
@@ -30,6 +46,10 @@ env:
   MODULES: ${{ inputs.modules }}
   REPLAY: ${{ inputs.replay }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
+  SAMPLE_LIBS: ${{ inputs.sample_libraries }}
+  SAMPLE_COUNT: ${{ inputs.sample_count }}
+  SAMPLE_SEED: ${{ inputs.sample_seed }}
+  TREE: ${{ inputs.tree }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
   GH_TOKEN: ${{ github.token }}
 jobs:
@@ -85,20 +105,23 @@ jobs:
           ls -l "$RUNNER_TEMP/init-exports"
       - name: Tengoku at the pin, with its compiled cache
         run: scripts/tengoku-setup.sh
-      - name: "The wide sample as statements (the 16 libraries, 4,800 theorems, seed wide-2 of the transplant runs): the same roots, theorems as axioms"
+      - name: "The sample as statements (by default the wide sample of the transplant runs): the same roots, theorems as axioms unless a definition's value mentions them"
         if: env.WIDE_SAMPLE == 'true'
         run: |
-          libs="aintlib compfiles azurite nlalib complexitylib causalean linearhadwiger leancert regularity-lemmata lie-lean formal-mathfin imoshortlist erdos-lean cslib physlib brownian-motion"
-          python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$libs" --n 4800 --seed wide-2 --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
+          [[ "$SAMPLE_COUNT" =~ ^[0-9]+$ ]] || { echo "bad count"; exit 1; }
+          for l in $SAMPLE_LIBS; do [[ "$l" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad library $l"; exit 1; }; done
+          python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$SAMPLE_LIBS" --n "$SAMPLE_COUNT" --seed "$SAMPLE_SEED" --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
+          wc -l "$RUNNER_TEMP/names.txt" "$RUNNER_TEMP/export-modules.txt"
           mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
-          mapfile -t names < "$RUNNER_TEMP/names.txt"
           cd .tengoku
-          # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (22 of the 4,800)
-          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" --statements > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
-          grep -cE "^PANIC" "$RUNNER_TEMP/sample-stmt.err" || true
+          # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (22 of the 4,800); the names come from a file (hundreds of thousands do not fit on a command line)
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements --names-file="$RUNNER_TEMP/names.txt" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
+          grep -E "^lean4export --statements: " "$RUNNER_TEMP/sample-stmt.err" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          echo "PANIC lines: $(grep -cE '^PANIC' "$RUNNER_TEMP/sample-stmt.err" || true)"
           cd "$GITHUB_WORKSPACE"
-          python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The wide sample as statements (4,800 theorems of 16 libraries, seed wide-2)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The sample as statements ($(wc -l < "$RUNNER_TEMP/names.txt") theorems of $SAMPLE_LIBS, seed $SAMPLE_SEED)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
+        if: env.TREE == 'true'
         working-directory: .tengoku
         run: |
           read -ra mods <<< "$MODULES"
