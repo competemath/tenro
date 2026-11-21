@@ -98,7 +98,6 @@ jobs:
           grep -cE "^PANIC" "$RUNNER_TEMP/sample-stmt.err" || true
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The wide sample as statements (4,800 theorems of 16 libraries, seed wide-2)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
-          python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/sample-stmt-stats.json"))["declarations"]["thm"] == 0 else 1)'
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
         working-directory: .tengoku
         run: |
@@ -107,7 +106,6 @@ jobs:
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/tree-stmt.err" || true
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/tree-stmt.ndjson" --time-log "$RUNNER_TEMP/tree-stmt.err" --label "The whole tree as statements ($MODULES)" --out "$RUNNER_TEMP/tree-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
-          python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/tree-stmt-stats.json"))["declarations"]["thm"] == 0 else 1)'
       - name: "Probe: the kernel replay of each statements export (tengai-replay from core/), the size of the module, what a session loads"
         if: env.REPLAY == 'true'
         continue-on-error: true

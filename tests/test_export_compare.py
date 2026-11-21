@@ -77,12 +77,22 @@ class Agreement(unittest.TestCase):
         self.assertFalse(r["passed"])
         self.assertEqual(r["problems"]["changed"], ["A1"])
 
-    def test_a_theorem_left_in_the_statements_export_is_refused(self):
+    def test_a_theorem_kept_with_its_proof_is_the_full_exports_theorem_and_is_counted(self):
         s = statements_export()
-        s.decl("thm", "lem", s.const("T"), s.const("base"))
+        s.decl("axiom", "deep", s.const("T"))  # what its proof mentions stays a stub
+        s.decl("thm", "lem", s.const("T"), s.const("deep"))  # kept: the full export's lem, term for term
+        r = compared(full_export(), s)
+        self.assertTrue(r["passed"], r["problems"])
+        self.assertEqual(r["theorems_kept"], 1)
+        self.assertEqual(r["theorems_as_axioms"], 1)  # A1
+
+    def test_a_theorem_kept_with_another_proof_is_a_change(self):
+        s = statements_export()
+        s.decl("thm", "lem", s.const("T"), s.const("base"))  # the full export's lem is proved by `deep`
         r = compared(full_export(), s)
         self.assertFalse(r["passed"])
-        self.assertEqual(r["problems"]["theorems_left"], ["lem"])
+        self.assertEqual(r["problems"]["changed"], ["lem"])
+        self.assertEqual(r["theorems_kept"], 0)
 
     def test_a_declaration_the_full_export_lacks_is_refused(self):
         s = statements_export()
@@ -225,7 +235,7 @@ class Command(unittest.TestCase):
         s.decl("thm", "lem", s.const("T"), s.const("base"))
         code, text, _ = self.run_cli(full_export(), s)
         self.assertEqual(code, 1)
-        self.assertIn("PROBLEM theorems_left: 1", text)
+        self.assertIn("PROBLEM changed: 1", text)
         self.assertTrue(text.rstrip().endswith("FAILED"))
 
 
