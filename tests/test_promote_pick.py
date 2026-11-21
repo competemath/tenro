@@ -117,3 +117,30 @@ class ImportTime(unittest.TestCase):
         bad = T.measure([sys.executable, "-c", "raise SystemExit(3)"], 2)
         self.assertEqual(bad["exit_codes"], [3, 3])
         self.assertEqual(T.main(["--runs", "1", "--", sys.executable, "-c", "raise SystemExit(1)"]), 1)
+
+    def test_compare_pairs_the_rounds_and_reports_net_times(self):
+        import import_time as T
+
+        fast = [sys.executable, "-c", "import time; time.sleep(0.02)"]
+        slow = [sys.executable, "-c", "import time; time.sleep(0.08)"]
+        r = T.compare(fast, {"slow": slow, "same": fast}, 4)
+        self.assertEqual(sorted(r["runs"]), ["baseline", "same", "slow"])
+        self.assertTrue(all(len(v) == 4 for v in r["runs"].values()))  # every command ran in every round
+        self.assertTrue(all(c == [0] * 4 for c in r["exit_codes"].values()))
+        self.assertGreater(r["slow"]["net_median"], 0.04)  # about 0.06 s slower than the baseline of the same round
+        self.assertLess(abs(r["same"]["net_median"]), 0.04)
+        self.assertEqual(len(r["slow"]["net_runs"]), 4)
+        self.assertGreater(r["slow"]["net_min"], 0.03)
+
+    def test_compare_through_the_command_line_and_a_failing_command(self):
+        import import_time as T
+
+        ok = f"{sys.executable} -c pass"
+        self.assertEqual(T.main(["compare", "--runs", "2", "--baseline", ok, "--target", f"A={ok}"]), 0)
+        self.assertEqual(
+            T.main(["compare", "--runs", "1", "--baseline", ok, "--target", f"B={sys.executable} -c 'raise SystemExit(2)'"]), 1
+        )
+        with self.assertRaises(SystemExit):
+            T.main(["compare", "--baseline", ok])  # no target
+        with self.assertRaises(SystemExit):
+            T.main(["compare", "--baseline", ok, "--target", "baseline=x"])  # a target cannot be called baseline
