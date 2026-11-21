@@ -12,7 +12,9 @@ are not written at all. Nothing else may change. This checks that, on two export
     first alpha-equivalent term it met, so which names a declaration carries depends on what was visited before it, and leaving the proofs out changes that (a declaration that differs only so is counted as
     `binder_names_only`, not as a change: a replay restores the names and annotations of the source from Tengoku's own environment, `tengai-extinfo` `bi` rows);
   * a declaration in both exports must have the same digest, except a THEOREM of the full export that is an axiom in the statements export: it must have the same name, level parameters and type;
-  * the statements export holds no theorem, and nothing the full export lacks.
+  * a theorem that the statements export keeps with its proof (the theorems a definition's value mentions: the exporter keeps them because the kernel may have to compute through them) must be the full
+    export's theorem, digest for digest, and is counted (`theorems_kept`);
+  * the statements export holds nothing the full export lacks.
 
 Exit 0 when all of that holds, 1 otherwise; the report says what was compared, how many theorems stand as axioms and how many declarations dropped out with the proofs. The names, levels and terms of a file are held in
 64-bit digests (8 bytes a term): a 40-million-line export takes about 400 MB and a few minutes.
@@ -183,12 +185,10 @@ def read(path: Path) -> Reader:
 
 def compare(full: Reader, stmt: Reader) -> dict:
     """what the two readers' declarations say about each other"""
-    problems: dict[str, list[str]] = {"changed": [], "only_in_statements": [], "theorems_left": []}
-    stubbed = same = 0
+    problems: dict[str, list[str]] = {"changed": [], "only_in_statements": []}
+    stubbed = same = kept = 0
     binder_only: list[str] = []
     for name, (kind, whole_a, head_a, whole_s, head_s) in stmt.decls.items():
-        if kind == "thm":
-            problems["theorems_left"].append(name)
         other = full.decls.get(name)
         if other is None:
             problems["only_in_statements"].append(name)
@@ -201,6 +201,7 @@ def compare(full: Reader, stmt: Reader) -> dict:
                 binder_only.append(name)
         elif other[0] == kind and other[1] == whole_a:
             same += 1
+            kept += kind == "thm"
             if other[3] != whole_s:
                 binder_only.append(name)
         else:
@@ -217,6 +218,7 @@ def compare(full: Reader, stmt: Reader) -> dict:
         "full": {"declarations": len(full.decls), "terms": len(full.terms), "kinds": kinds(full)},
         "statements": {"declarations": len(stmt.decls), "terms": len(stmt.terms), "kinds": kinds(stmt)},
         "theorems_as_axioms": stubbed,
+        "theorems_kept": kept,
         "unchanged": same,
         "binder_names_only": len(binder_only),
         "binder_names_only_examples": binder_only[:10],
@@ -241,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"full: {f['declarations']:,} declarations, {f['terms']:,} terms; statements: {s['declarations']:,} declarations, {s['terms']:,} terms "
         f"({100 * s['terms'] / max(f['terms'], 1):.1f} % of the terms); {report['theorems_as_axioms']:,} theorems stand as axioms, "
-        f"{report['unchanged']:,} declarations are the same, {report['dropped_with_the_proofs']:,} dropped out with the proofs; "
+        f"{report['theorems_kept']:,} are kept with their proofs, {report['unchanged']:,} declarations are the same (the kept theorems among them), {report['dropped_with_the_proofs']:,} dropped out with the proofs; "
         f"{report['binder_names_only']:,} of the shared ones differ only in binder names or binder info (the exporter's term sharing)"
     )
     for k, n in report["problem_counts"].items():

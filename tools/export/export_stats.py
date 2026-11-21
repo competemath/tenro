@@ -78,7 +78,7 @@ def markdown(s: dict) -> str:
     return (
         f"### {s['label'] or 'an export'}\n\n"
         f"{s['lines']:,} lines, {s['bytes'] / 1e6:,.0f} MB{zst}{cost}.\n\n"
-        "| names | levels | terms | axioms | definitions | inductive groups | opaque | quot | theorems |\n"
+        "| names | levels | terms | axioms | definitions | inductive groups | opaque | quot | theorems (a statements export: those kept with their proofs) |\n"
         "|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n"
         f"| {s['names']:,} | {s['levels']:,} | {s['terms']:,} | {d['axiom']:,} | {d['def']:,} | {d['inductive']:,} | {d['opaque']:,} | {d['quot']:,} | {d['thm']:,} |\n"
     )
