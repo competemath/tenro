@@ -473,8 +473,26 @@ jobs:
           # every layer imported: the export holds Lean core and all the layers, so a topic's references into the foundation are checked against the foundation as the olean files hold it
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" > "$RUNNER_TEMP/layered.ndjson"
           wc -lc "$RUNNER_TEMP/layered.ndjson"
-          sed "s|$RUNNER_TEMP/replayed.ndjson|$RUNNER_TEMP/layered.ndjson|" "$RUNNER_TEMP/nanoda.json" > "$RUNNER_TEMP/nanoda-layers.json"
           nanoda="$RUNNER_TEMP/nanoda/target/release/nanoda_bin"
+          if [ ! -x "$nanoda" ]; then   # `layers_only` skips the one-module steps, which build nanoda and write its configuration
+            git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
+            git -C "$RUNNER_TEMP/nanoda" checkout -q "$NANODA_COMMIT"
+            (cd "$RUNNER_TEMP/nanoda" && cargo build --release --locked 2>&1 | tail -2)
+          fi
+          # the export holds all of Lean core, which declares sorryAx and the compiler axioms (as in Tengoku's nightly): nanoda admits them; what the SAMPLE depends on is checked separately, theorem by theorem
+          cat > "$RUNNER_TEMP/nanoda-layers.json" <<JSON
+          {
+            "export_file_path": "$RUNNER_TEMP/layered.ndjson",
+            "use_stdin": false,
+            "permitted_axioms": ["propext", "Classical.choice", "Quot.sound", "sorryAx", "Lean.ofReduceBool", "Lean.ofReduceNat", "Lean.trustCompiler"],
+            "unpermitted_axiom_hard_error": true,
+            "num_threads": 4,
+            "nat_extension": true,
+            "string_extension": true,
+            "print_success_message": true,
+            "pp_to_stdout": true
+          }
+          JSON
           if /usr/bin/time -v "$nanoda" "$RUNNER_TEMP/nanoda-layers.json" > "$RUNNER_TEMP/nanoda-layers.out" 2> "$RUNNER_TEMP/nanoda-layers-time.txt"; then echo ok > "$RUNNER_TEMP/nanoda-layers.status"; else echo FAILED > "$RUNNER_TEMP/nanoda-layers.status"; fi
           checked="$(grep -E 'Checked [0-9]+ declarations with no errors' "$RUNNER_TEMP/nanoda-layers.out" | tail -1 || true)"
           echo "layered modules, independent check (nanoda): $(cat "$RUNNER_TEMP/nanoda-layers.status"); ${checked:-no success line}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
@@ -497,7 +515,7 @@ jobs:
           cd core
           core_path="$(lake env printenv LEAN_PATH)"
           LEAN_PATH="$RUNNER_TEMP/unpacked-layers:$core_path" lake env lean "$RUNNER_TEMP/import-layers.lean"
-          echo "the layered snapshot imports from its unpacked copy: $(ls -l "$RUNNER_TEMP/snapshot-layers.tar.zst" | awk '{print $5}') bytes, sha256 ${sum:0:16}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
+          echo "the layered snapshot imports from its unpacked copy: $(stat -c %s "$RUNNER_TEMP/snapshot-layers.tar.zst") bytes, sha256 ${sum:0:16}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.LAYERS == 'true'
         with:
