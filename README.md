@@ -29,6 +29,8 @@ Content moves one way only. Nothing here is imported by Tengai; Tengoku receives
 | `eval/` | harness specs, identifier scramblers, the pre-registered protocol (runs and the held-out suite are not here) |
 | `tools/` | the instruments, see [docs/tools.md](docs/tools.md) |
 
+How Tengoku theorems are promoted into a Tengai module, and what the first 5,000 measured, is in [docs/transplant.md](docs/transplant.md).
+
 A hypothesis is promoted to Tengai only on a net Pareto improvement, as a patch that applies cleanly to Tengai's `main`
 (a daily dry run checks that for every live hypothesis).
 
