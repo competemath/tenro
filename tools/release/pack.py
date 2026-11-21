@@ -4,7 +4,7 @@
   pack.py pack --olean-dir DIR --manifest MANIFEST.json --out SNAPSHOT.tar        DIR/TengaiData/*.olean + manifest.json -> a deterministic tar (sorted, mtime 0, owner 0): the same inputs give the same bytes
   pack.py verify SNAPSHOT.tar[.zst|.gz] [--sha256 H] --into DIR                    unpack, check every .olean against the manifest's sha256, print the LEAN_PATH entry that makes `import TengaiData.X` work
 
-A snapshot is what a prover environment (Leak) puts on its LEAN_PATH next to Lean core: `LEAN_PATH=DIR:$LEAN_PATH`. Compression is the caller's (`zstd -T0 -19 --long SNAPSHOT.tar`); verify reads .tar, .tar.zst (the `zstd`
+A snapshot (manifest schema 1: one module; schema 2: a promotion in layers, `manifest.py layers`) is what a prover environment (Leak) puts on its LEAN_PATH next to Lean core: `LEAN_PATH=DIR:$LEAN_PATH`. Compression is the caller's (`zstd -T0 -19 --long SNAPSHOT.tar`); verify reads .tar, .tar.zst (the `zstd`
 binary) and .tar.gz. What is checked on the way in: the sha256 of the file when one is given, that no member escapes DIR, and that every module's .olean has the hash and the size the manifest recorded for the module it was built from.
 The trust is in the hashes, not in where the file came from: an untrusted mirror can serve it.
 """
@@ -64,6 +64,28 @@ def open_tar(path: Path) -> tarfile.TarFile:
     return tarfile.open(path, "r:*")
 
 
+def verify_layers(manifest: dict, into: Path, oleans: list[Path]) -> None:
+    """manifest schema 2 (a promotion in layers): the snapshot holds exactly the layers the manifest lists, each with the size and the sha256 it recorded, and every layer imports only layers of the manifest"""
+    layers = manifest.get("layers") or []
+    if not layers:
+        raise SystemExit("verify: the manifest (schema 2) lists no layers")
+    modules = {x["module"] for x in layers}
+    want = {x["module"]: x["olean"] for x in layers}
+    have = {p.relative_to(into).with_suffix("").as_posix().replace("/", "."): p for p in oleans}
+    if set(have) != modules:
+        raise SystemExit(
+            f"verify: the snapshot and the manifest list other layers: missing {sorted(modules - set(have))}, not in the manifest {sorted(set(have) - modules)}"
+        )
+    for module, rec in want.items():
+        got = {"bytes": have[module].stat().st_size, "sha256": sha256_file(have[module])}
+        if got["bytes"] != rec["bytes"] or got["sha256"] != rec["sha256"]:
+            raise SystemExit(f"verify: {module} differs from the manifest ({got['sha256'][:12]} vs {rec['sha256'][:12]})")
+    for x in layers:
+        unknown = [m for m in x["imports"] if m not in modules]
+        if unknown:
+            raise SystemExit(f"verify: {x['module']} imports {unknown}, which the manifest does not list")
+
+
 def verify(snapshot: Path, into: Path, sha256: str | None = None) -> dict:
     if sha256 is not None and sha256_file(snapshot) != sha256:
         raise SystemExit(f"verify: {snapshot.name} does not have the sha256 {sha256}")
@@ -76,17 +98,20 @@ def verify(snapshot: Path, into: Path, sha256: str | None = None) -> dict:
                 raise SystemExit(f"verify: refusing member {m.name!r} (not a plain file inside the target)")
         tar.extractall(into, filter="data")
     manifest = json.loads((into / "manifest.json").read_text(encoding="utf-8"))
-    recorded = (manifest.get("artifact") or {}).get("olean")
     oleans = sorted((into / "TengaiData").rglob("*.olean"))
     if not oleans:
         raise SystemExit("verify: the snapshot holds no .olean")
-    if recorded is None:
-        raise SystemExit("verify: the manifest records no olean (a transplant that did not finish)")
-    if len(oleans) != 1:
-        raise SystemExit(f"verify: manifest schema 1 records one module, the snapshot holds {len(oleans)}")
-    got = {"bytes": oleans[0].stat().st_size, "sha256": sha256_file(oleans[0])}
-    if got["bytes"] != recorded["bytes"] or got["sha256"] != recorded["sha256"]:
-        raise SystemExit(f"verify: {oleans[0].name} differs from the manifest ({got['sha256'][:12]} vs {recorded['sha256'][:12]})")
+    if manifest.get("schema") == 2:
+        verify_layers(manifest, into, oleans)
+    else:
+        recorded = (manifest.get("artifact") or {}).get("olean")
+        if recorded is None:
+            raise SystemExit("verify: the manifest records no olean (a transplant that did not finish)")
+        if len(oleans) != 1:
+            raise SystemExit(f"verify: manifest schema 1 records one module, the snapshot holds {len(oleans)}")
+        got = {"bytes": oleans[0].stat().st_size, "sha256": sha256_file(oleans[0])}
+        if got["bytes"] != recorded["bytes"] or got["sha256"] != recorded["sha256"]:
+            raise SystemExit(f"verify: {oleans[0].name} differs from the manifest ({got['sha256'][:12]} vs {recorded['sha256'][:12]})")
     checks = manifest.get("checks", {})
     return {
         "into": str(into),

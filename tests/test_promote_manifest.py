@@ -197,3 +197,101 @@ class Manifest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManifestLayers(unittest.TestCase):
+    def files(self, d: Path):
+        (d / "layers").mkdir()
+        (d / "layered" / "TengaiData" / "Topic").mkdir(parents=True)
+        (d / "layered" / "TengaiData" / "Foundation.olean").write_bytes(b"f" * 4000)
+        (d / "layered" / "TengaiData" / "Topic" / "A.olean").write_bytes(b"a" * 2000)
+        plan = {
+            "layers": [
+                {"module": "TengaiData.Foundation", "topic": None, "imports": [], "units": 10, "constants": 12, "file": "x"},
+                {
+                    "module": "TengaiData.Topic.A",
+                    "topic": "A",
+                    "imports": ["TengaiData.Foundation"],
+                    "units": 4,
+                    "constants": 5,
+                    "file": "y",
+                },
+            ],
+            "topics": {"A": {"theorems": 2, "module": "TengaiData.Topic.A"}},
+            "totals": {},
+        }
+        (d / "layers" / "layers.json").write_text(json.dumps(plan))
+        (d / "sample.jsonl").write_text(
+            "".join(
+                json.dumps(r) + "\n"
+                for r in [
+                    {"name": "A.t1", "id": "i1", "library": "A", "module": "m"},
+                    {"name": "A.t2", "id": None, "library": "A", "module": "m"},
+                ]
+            )
+        )
+        (d / "layer-stats.jsonl").write_text(
+            json.dumps({"ext": {"instances": 3, "failed": 0}, "replay": {"added": 9, "skipped": 3}})
+            + "\n"
+            + json.dumps({"ext": {"instances": 1, "failed": 0}, "replay": {"added": 5, "skipped": 0}})
+            + "\n"
+        )
+        (d / "nanoda-layers.status").write_text("ok\n")
+        (d / "nanoda-layers.out").write_text("Checked 123 declarations with no errors\n")
+        (d / "statement-ids-layers.json").write_text(
+            json.dumps({"names": 2, "equal": 1, "ok": True, "no_source_id": 1, "different": [], "drift": []})
+        )
+        (d / "layers-axioms.txt").write_text("'A.t1' depends on axioms: [propext]\n'A.t2' does not depend on any axioms\n")
+        (d / "layers-load.json").write_text(
+            json.dumps(
+                {
+                    "rows": [
+                        ["Foundation", 0.4, {"median": 0.3, "net_median": 0.06, "net_min": 0.05}],
+                        ["Topic_A", 0.6, {"median": 0.32, "net_median": 0.08, "net_min": 0.07}],
+                    ],
+                    "empty": {"min": 0.2, "median": 0.24},
+                }
+            )
+        )
+
+    def test_a_promotion_in_layers_is_recorded_layer_by_layer(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            self.assertEqual(m["schema"], 2)
+            self.assertEqual([x["module"] for x in m["layers"]], ["TengaiData.Foundation", "TengaiData.Topic.A"])
+            self.assertEqual([x["theorems"] for x in m["layers"]], [0, 2])
+            self.assertEqual([x["olean"]["bytes"] for x in m["layers"]], [4000, 2000])
+            self.assertEqual(m["totals"], {"olean_bytes": 6000, "constants_added": 14, "theorems": 2})
+            self.assertEqual(m["layers"][0]["extensions"], {"instances": 3, "failed": 0})
+            self.assertEqual(m["checks"]["kernel"], "accepted")
+            self.assertEqual(m["checks"]["nanoda"], {"status": "ok", "declarations": 123})
+            self.assertEqual(m["checks"]["statement_ids"]["no_source_id"], 1)
+            self.assertEqual(
+                m["checks"]["session_load"]["sets"]["Topic_A"], {"olean_mb": 0.6, "median": 0.32, "net_median": 0.08, "net_min": 0.07}
+            )
+            self.assertTrue(m["checks"]["axioms"]["standard_only"])
+
+    def test_the_manifest_is_the_same_for_the_same_inputs_and_main_writes_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            args = ["layers", "--dir", str(d), "--layered", str(d / "layered"), "--out", str(d / "a.json"), "--pin", "tengoku=abc"]
+            self.assertEqual(M.main(args), 0)
+            self.assertEqual(M.main([*args[:-4], "--out", str(d / "b.json"), "--pin", "tengoku=abc"]), 0)
+            self.assertEqual((d / "a.json").read_text(), (d / "b.json").read_text())
+
+    def test_a_layer_without_its_olean_is_an_error_and_a_check_that_did_not_run_is_null(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "layered" / "TengaiData" / "Topic" / "A.olean").unlink()
+            with self.assertRaises(SystemExit):
+                M.build_layers(d, d / "layered", {})
+            (d / "layered" / "TengaiData" / "Topic" / "A.olean").write_bytes(b"a")
+            (d / "nanoda-layers.status").unlink()
+            (d / "layers-load.json").unlink()
+            m = M.build_layers(d, d / "layered", {})
+            self.assertIsNone(m["checks"]["nanoda"])
+            self.assertIsNone(m["checks"]["session_load"])
