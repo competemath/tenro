@@ -428,6 +428,23 @@ jobs:
           assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
           print(f"layers: {len(names)} theorems resolve, all within {sorted(allowed)}")
           PY
+      - name: "Layers: the layered modules read back out of their .olean files and checked again by nanoda (invariant I1, across the layers)"
+        if: env.LAYERS == 'true'
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/layered:$core_path"
+          mods=(); while read -r module _; do mods+=("$module"); done < "$RUNNER_TEMP/layer-order.txt"
+          # every layer imported: the export holds Lean core and all the layers, so a topic's references into the foundation are checked against the foundation as the olean files hold it
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" > "$RUNNER_TEMP/layered.ndjson"
+          wc -lc "$RUNNER_TEMP/layered.ndjson"
+          sed "s|$RUNNER_TEMP/replayed.ndjson|$RUNNER_TEMP/layered.ndjson|" "$RUNNER_TEMP/nanoda.json" > "$RUNNER_TEMP/nanoda-layers.json"
+          nanoda="$RUNNER_TEMP/nanoda/target/release/nanoda_bin"
+          if /usr/bin/time -v "$nanoda" "$RUNNER_TEMP/nanoda-layers.json" > "$RUNNER_TEMP/nanoda-layers.out" 2> "$RUNNER_TEMP/nanoda-layers-time.txt"; then echo ok > "$RUNNER_TEMP/nanoda-layers.status"; else echo FAILED > "$RUNNER_TEMP/nanoda-layers.status"; fi
+          checked="$(grep -E 'Checked [0-9]+ declarations with no errors' "$RUNNER_TEMP/nanoda-layers.out" | tail -1 || true)"
+          echo "layered modules, independent check (nanoda): $(cat "$RUNNER_TEMP/nanoda-layers.status"); ${checked:-no success line}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-layers-time.txt" || true
+          if [ "$(cat "$RUNNER_TEMP/nanoda-layers.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-layers-time.txt"; exit 1; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.LAYERS == 'true'
         with:
