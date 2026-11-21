@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "closure"))
@@ -38,6 +39,16 @@ class Full(cl.Export):
         self.unit_of: dict[int, int] = {}  # declared constant -> the first name of its unit
         self.members: dict[int, list[int]] = {}  # first name of a unit -> every constant of it
         self.direct_full: dict[int, frozenset[int]] = {}
+        # kinds of declaration whose VALUE is left out: a stubbed theorem stands as an axiom of its type (`stmt_closure.py`)
+        self.stub: frozenset[str] = frozenset()
+        # unit -> the terms below its declarations: a measure of its size, the same bias in every regime
+        self.unit_terms: dict[int, int] = {}
+
+    def set_stub(self, stub: frozenset[str]) -> None:
+        """change which kinds of declaration have their value left out (`thm`, `opaque`, `def`, ...); what was computed under the other setting is dropped"""
+        self.stub = stub
+        self.direct_full.clear()
+        self.unit_terms.clear()
 
     def line(self, o: dict) -> None:
         if "in" in o and "num" in o:
@@ -78,7 +89,8 @@ class Full(cl.Export):
             stack: list[int] = []
             for m in self.members[first]:
                 ty, val, extra = self.decl[m]
-                stack.extend([ty, *extra] + ([val] if val >= 0 else []))
+                keep_value = val >= 0 and self.decl_kind[m] not in self.stub
+                stack.extend([ty, *extra] + ([val] if keep_value else []))
             while stack:
                 t = stack.pop()
                 if t in seen:
@@ -99,6 +111,7 @@ class Full(cl.Export):
                     stack.append(a[t])
             d = frozenset(self.unit_of[x] for x in consts if x in self.unit_of) - {first}
             self.direct_full[first] = d
+            self.unit_terms[first] = len(seen)
         return d
 
     def unit_closure(self, roots: set[int]) -> set[int]:
@@ -176,6 +189,7 @@ def plan(
                 else ([f"{prefix}.{foundation}"] if any(x == foundation for x in layer_of.values()) else []),
                 "units": len(units),
                 "constants": sum(len(ex.members[u]) for u in units),
+                "terms": sum(ex.unit_terms[u] for u in units),
                 "file": f"{module}.names.jsonl",
             }
         )
@@ -189,6 +203,9 @@ def plan(
             "own_units": own,
             "foundation_units_used": shared,
             "units_loaded": own + shared,
+            "terms_loaded": sum(
+                ex.unit_terms[u] for u, name in layer_of.items() if name == t or (name == foundation and users[u] >> order.index(t) & 1)
+            ),
         }
     total = len(layer_of)
     return {
@@ -198,6 +215,8 @@ def plan(
             "units": total,
             "foundation_units": sum(1 for x in layer_of.values() if x == foundation),
             "constants": sum(len(ex.members[u]) for u in layer_of),
+            "terms": sum(ex.unit_terms[u] for u in layer_of),
+            "kinds": dict(sorted(Counter(ex.decl_kind[u] for u in layer_of).items())),  # the units by the kind of their first constant
         },
         "names": names_out,
     }

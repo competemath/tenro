@@ -1,0 +1,92 @@
+# What a base of STATEMENTS would hold (tools/promote/stmt_closure.py): the closure of a seeded sample of Tengoku's intake theorems, with and without the proofs of theorems. A seeded sample is exported with its
+# whole closure (lean4export), and the layer planner of a promotion is run under three regimes (the full closure; theorems as axioms of their type; opaque constants too). Nothing is replayed or checked:
+# the export alone says it, so this takes minutes where a transplant takes hours. Manual. It measures; it changes nothing.
+name: stmt-closure
+on:
+  workflow_dispatch:
+    inputs:
+      library:
+        description: "Libraries of the intake manifests of the pinned Tengoku (data/intake/<library>/manifest.jsonl), separated by spaces"
+        required: true
+        default: "aintlib compfiles azurite nlalib complexitylib causalean linearhadwiger leancert regularity-lemmata lie-lean formal-mathfin imoshortlist erdos-lean cslib physlib brownian-motion"
+      count:
+        description: "How many theorems to sample"
+        required: true
+        default: "4800"
+      seed:
+        description: "Sample seed"
+        required: true
+        default: "wide-2"
+permissions: {}
+concurrency:
+  group: stmt-closure
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  LIB: ${{ inputs.library }}
+  COUNT: ${{ inputs.count }}
+  SEED: ${{ inputs.seed }}
+  LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions: { contents: read }
+    steps:
+      - name: Free disk (Tengoku's compiled cache is several GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift /usr/lib/jvm /usr/share/miniconda /usr/local/share/powershell /usr/local/lib/node_modules /opt/az /usr/local/graalvm /usr/local/share/chromium
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Tengoku at the pin, with its compiled cache
+        run: scripts/tengoku-setup.sh
+      - name: A seeded sample (from the intake manifests)
+        run: |
+          [[ "$COUNT" =~ ^[0-9]+$ ]] || { echo "bad count"; exit 1; }
+          for l in $LIB; do [[ "$l" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad library $l"; exit 1; }; done
+          test -d .tengoku/data/intake
+          python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$LIB" --n "$COUNT" --seed "$SEED" --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
+      - name: lean4export at the pinned commit
+        run: |
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
+          git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
+          cd "$RUNNER_TEMP/lean4export" && lake build 2>&1 | tail -3
+      - name: Export the closure of the sample
+        working-directory: .tengoku
+        run: |
+          mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
+          mapfile -t names < "$RUNNER_TEMP/names.txt"
+          lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson" 2> "$RUNNER_TEMP/export.err"
+          wc -lc "$RUNNER_TEMP/sample.ndjson"
+          # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it: taken out of the sample, counted, never silent
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/promote/missing.py --err "$RUNNER_TEMP/export.err" --names "$RUNNER_TEMP/names.txt" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: The closure under the regimes (full; theorems as axioms of their type; opaque constants too)
+        run: |
+          python3 - <<'PY'
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          topics: dict[str, list[str]] = {}
+          for ln in open(f"{t}/sample.jsonl"):
+              if ln.strip():
+                  r = json.loads(ln)
+                  topics.setdefault(r["library"], []).append(r["name"])
+          json.dump(topics, open(f"{t}/topics.json", "w"))
+          print("topics:", {k: len(v) for k, v in topics.items()})
+          PY
+          python3 tools/promote/stmt_closure.py "$RUNNER_TEMP/sample.ndjson" --topics "$RUNNER_TEMP/topics.json" --out "$RUNNER_TEMP/stmt-closure.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: stmt-closure
+          path: ${{ runner.temp }}/stmt-closure.json
+          retention-days: 30
