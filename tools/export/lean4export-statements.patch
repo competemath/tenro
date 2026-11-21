@@ -1,0 +1,60 @@
+--- a/Export.lean
++++ b/Export.lean
+@@ -40,6 +40,8 @@
+   noMDataExprs : HashMap Expr Expr := HashMap.emptyWithCapacity 100000
+   exportMData : Bool := false
+   exportUnsafe : Bool := false
++  /-- `--statements`: a theorem is exported as an axiom of its type and its proof is not visited, so the constants only proofs use are not exported (a base for search, not for checking) -/
++  statementsOnly : Bool := false
+   ignoreMissing : Bool := false
+   /-- Maps the name of an inductive type to a list of names of corresponding recursors.
+   This is used to facilitate exporting of related inductives, constructors, and recursors as a unit. -/
+@@ -71,6 +73,7 @@
+   modify fun st => { st with
+     exportMData   := cliOptions.any (· == "--export-mdata")
+     exportUnsafe  := cliOptions.any (· == "--export-unsafe")
++    statementsOnly := cliOptions.any (· == "--statements")
+     ignoreMissing := cliOptions.any (· == "--ignore-missing")
+     recursorMap
+   }
+@@ -277,17 +280,29 @@
+       ])
+     ]
+   | .thmInfo val => do
+-    dumpDeps val.type
+-    dumpDeps val.value
+-    dumpObj [
+-      ("thm", Json.mkObj [
+-        ("name", ← dumpName val.name),
+-        ("levelParams", ← dumpUparams val.levelParams),
+-        ("type", ← dumpExpr val.type),
+-        ("value", ← dumpExpr val.value),
+-        ("all", ← dumpNames val.all)
+-      ])
+-    ]
++    if (← get).statementsOnly then
++      -- an axiom of the theorem's type: the proof is never visited
++      dumpDeps val.type
++      dumpObj [
++        ("axiom", Json.mkObj [
++          ("name", ← dumpName val.name),
++          ("levelParams", ← dumpUparams val.levelParams),
++          ("type", ← dumpExpr val.type),
++          ("isUnsafe", false)
++        ])
++      ]
++    else
++      dumpDeps val.type
++      dumpDeps val.value
++      dumpObj [
++        ("thm", Json.mkObj [
++          ("name", ← dumpName val.name),
++          ("levelParams", ← dumpUparams val.levelParams),
++          ("type", ← dumpExpr val.type),
++          ("value", ← dumpExpr val.value),
++          ("all", ← dumpNames val.all)
++        ])
++      ]
+   | .quotInfo _ =>
+     -- Always dump full Quot package in the sensible order
+     dumpConstant ``Eq
