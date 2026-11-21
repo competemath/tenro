@@ -12,6 +12,10 @@ on:
         description: "Carry the extension entries (reducibility, classes, instances, projection info) from Tengoku into the built module (two replay passes: the first finds what was added, tengai-extinfo reads it in Tengoku, the second applies it)"
         required: true
         default: "true"
+      layers:
+        description: "Also promote by layers (a foundation and one layer per library of the sample, tools/promote/layers.py, tengai-replay --import/--only) and measure what a session loads: needs extensions=true and a candidates run"
+        required: false
+        default: "false"
       candidates_run:
         description: "Run id of a `candidates` run whose artifact lists the theorems (several libraries, no isnad pass). Empty: sample one library by an isnad pass."
         required: false
@@ -35,6 +39,7 @@ env:
   LIB: ${{ inputs.library }}
   CAND_RUN: ${{ inputs.candidates_run }}
   EXTENSIONS: ${{ inputs.extensions }}
+  LAYERS: ${{ inputs.layers }}
   COUNT: ${{ inputs.count }}
   SEED: ${{ inputs.seed }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
@@ -98,6 +103,24 @@ jobs:
           mapfile -t names < "$RUNNER_TEMP/names.txt"
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson"
           wc -lc "$RUNNER_TEMP/sample.ndjson"
+      - name: "Layers: the plan (which layer each constant of the sample belongs to)"
+        if: env.LAYERS == 'true'
+        continue-on-error: true   # the planner reads a 2 GB export in Python: if it fails, the one-module pipeline below still runs and the layer steps say why they cannot
+        run: |
+          [ "$EXTENSIONS" = true ] && [ -s "$RUNNER_TEMP/sample.jsonl" ] || { echo "::error::layers needs extensions=true and a candidates run (the libraries of the sample are its topics)"; exit 1; }
+          python3 - <<'PY'
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          topics: dict[str, list[str]] = {}
+          for ln in open(f"{t}/sample.jsonl"):
+              if ln.strip():
+                  r = json.loads(ln)
+                  topics.setdefault(r["library"], []).append(r["name"])
+          json.dump(topics, open(f"{t}/topics.json", "w"))
+          print("topics:", {k: len(v) for k, v in topics.items()})
+          PY
+          python3 tools/promote/layers.py "$RUNNER_TEMP/sample.ndjson" --topics "$RUNNER_TEMP/topics.json" --out "$RUNNER_TEMP/layers" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls -l "$RUNNER_TEMP/layers/layers.json"
       - name: tengai-replay from core/ (kernel replay into Lean core alone, then the extension entries put back)
         run: |
           (cd core && lake build tengai-replay tengai-extinfo tengai-typeinfo 2>&1 | tail -3)
@@ -285,3 +308,127 @@ jobs:
           assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
           print(f"axioms: {len(names)} theorems, all within {sorted(allowed)}")
           PY
+
+      # ----- by layers (ADR-0005, "Layers"): the same sample promoted as a foundation and a layer per library, and what a session loads of it. Added after the one-module pipeline above, which it does not touch.
+      - name: "Layers: tengai-replay by layers (the foundation first, then each topic, each kernel-checked on its own)"
+        if: env.LAYERS == 'true'
+        run: |
+          [ -s "$RUNNER_TEMP/layers/layers.json" ] || { echo "::error::the plan of the layers failed (its step above says why)"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/layered"
+          export LEAN_PATH="$RUNNER_TEMP/layered"
+          replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
+          python3 - <<'PY' > "$RUNNER_TEMP/layer-order.txt"
+          import json, os
+          p = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "layers", "layers.json")))
+          for layer in p["layers"]:
+              print(layer["module"], layer["file"], *layer["imports"])
+          PY
+          : > "$RUNNER_TEMP/layer-stats.jsonl"
+          while read -r module file imports; do
+            read -r -a wanted <<< "$imports"
+            args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
+            /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --ext "$RUNNER_TEMP/ext.jsonl" "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
+            echo "$module: $(grep -E 'Elapsed' "$RUNNER_TEMP/layer-time.txt")"
+          done < "$RUNNER_TEMP/layer-order.txt"
+          find "$RUNNER_TEMP/layered" -name '*.olean' -printf '%s %P\n' | sort -k2
+      - name: "Layers: what a session loads (the cold import of the foundation, of each topic, of everything, and of the one module)"
+        if: env.LAYERS == 'true'
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          printf 'import Init\n' > "$RUNNER_TEMP/l-empty.lean"
+          LEAN_PATH="$RUNNER_TEMP/layered:$core_path" python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/l-empty.lean" > "$RUNNER_TEMP/l-empty.json"
+          python3 - <<'PY' > "$RUNNER_TEMP/l-sets.txt"
+          import json, os
+          p = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "layers", "layers.json")))
+          for layer in p["layers"]:
+              print(layer["module"].split(".")[-1], layer["module"])
+          print("All", *[x["module"] for x in p["layers"]])
+          PY
+          while read -r label modules; do
+            read -r -a wanted <<< "$modules"
+            : > "$RUNNER_TEMP/l-$label.lean"; for m in "${wanted[@]}"; do printf 'import %s\n' "$m" >> "$RUNNER_TEMP/l-$label.lean"; done
+            LEAN_PATH="$RUNNER_TEMP/layered:$core_path" python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/l-$label.lean" > "$RUNNER_TEMP/l-$label.json"
+          done < "$RUNNER_TEMP/l-sets.txt"
+          printf 'import TengaiData.Sample\n' > "$RUNNER_TEMP/l-Sample.lean"
+          LEAN_PATH="$RUNNER_TEMP/out:$core_path" python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/l-Sample.lean" > "$RUNNER_TEMP/l-Sample.json"
+          cd ..
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
+          import json, os, subprocess
+          t = os.environ["RUNNER_TEMP"]
+          p = json.load(open(f"{t}/layers/layers.json"))
+          size = {}
+          for layer in p["layers"]:
+              path = f"{t}/layered/" + layer["module"].replace(".", "/") + ".olean"
+              size[layer["module"]] = os.path.getsize(path)
+          mono = os.path.getsize(f"{t}/out/TengaiData/Sample.olean")
+          empty = json.load(open(f"{t}/l-empty.json"))["median"]
+          print("## what a session loads, layered against one module")
+          print("| imports | olean bytes loaded (MB) | cold import, median of 7 (s) | net over an empty module (s) |")
+          print("|---|---|---|---|")
+          rows = []
+          for line in open(f"{t}/l-sets.txt"):
+              label, *mods = line.split()
+              med = json.load(open(f"{t}/l-{label}.json"))["median"]
+              loaded = set()
+              for m in mods:
+                  loaded.add(m)
+                  loaded.update(next(x for x in p["layers"] if x["module"] == m)["imports"])
+              mb = sum(size[m] for m in loaded) / 1e6
+              rows.append((label, mb, med))
+          med_mono = json.load(open(f"{t}/l-Sample.json"))["median"]
+          rows.append(("TengaiData.Sample (one module)", mono / 1e6, med_mono))
+          for label, mb, med in rows:
+              print(f"| {label} | {mb:.1f} | {med} | {med - empty:.3f} |")
+          print(f"\nan empty module: {empty} s; cap C_load 0.25 s")
+          zs = {}
+          for layer in p["layers"]:
+              path = f"{t}/layered/" + layer["module"].replace(".", "/") + ".olean"
+              zs[layer["module"]] = int(subprocess.run(f"zstd -3 -c {path} | wc -c", shell=True, capture_output=True, text=True).stdout.split()[0])
+          print("\nzstd -3 of each layer (MB): " + ", ".join(f"{m.split('.')[-1]} {v / 1e6:.1f}" for m, v in zs.items()))
+          json.dump({"rows": rows, "empty": empty, "olean": size, "zstd3": zs, "one_module": mono}, open(f"{t}/layers-load.json", "w"))
+          PY
+      - name: "Layers: the same statements (isnad ids of every layer against Tengoku's)"
+        if: env.LAYERS == 'true'
+        run: |
+          core_path="$(cd "$TOOLS" && lake env printenv LEAN_PATH)"
+          : > "$RUNNER_TEMP/isnad-layers.tsv"; : > "$RUNNER_TEMP/isnad-layers.err"
+          while read -r module _; do
+            (cd "$TOOLS" && LEAN_PATH="$RUNNER_TEMP/layered:$core_path" "$TOOLS/.lake/build/bin/tengoku-isnad" --module "$module") >> "$RUNNER_TEMP/isnad-layers.tsv" 2>> "$RUNNER_TEMP/isnad-layers.err" || true
+          done < "$RUNNER_TEMP/layer-order.txt"
+          wc -l "$RUNNER_TEMP/isnad-layers.tsv"
+          python3 tools/promote/compare_ids.py --isnad-py "$TOOLS/scripts/isnad.py" --names "$RUNNER_TEMP/names.txt" --source-jsonl "$RUNNER_TEMP/sample.jsonl" --replayed "$RUNNER_TEMP/isnad-layers.tsv" --out "$RUNNER_TEMP/statement-ids-layers.json" | tee -a "$GITHUB_STEP_SUMMARY" || echo "statement ids of the layers differ"
+      - name: "Layers: every theorem resolves from the layers and rests on the standard axioms only"
+        if: env.LAYERS == 'true'
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/layered:$core_path"
+          { while read -r module _; do printf 'import %s\n' "$module"; done < "$RUNNER_TEMP/layer-order.txt"; while read -r n; do printf '#print axioms %s\n' "$n"; done < "$RUNNER_TEMP/names.txt"; } > "$RUNNER_TEMP/layers-check.lean"
+          lake env lean "$RUNNER_TEMP/layers-check.lean" > "$RUNNER_TEMP/layers-axioms.txt"
+          python3 - <<'PY'
+          import os, re
+          t = os.environ["RUNNER_TEMP"]
+          names = [n for n in open(f"{t}/names.txt").read().split() if n]
+          text = open(f"{t}/layers-axioms.txt").read()
+          allowed = {"propext", "Classical.choice", "Quot.sound"}
+          seen = set()
+          for m in re.finditer(r"'(.+?)'\s+(depends on axioms:\s*\[([^\]]*)\]|does not depend on any axioms)", text, re.S):
+              seen.add(m.group(1).strip())
+              used = {a.strip() for a in (m.group(3) or "").replace("\n", " ").split(",") if a.strip()}
+              assert used <= allowed, f"{m.group(1)} depends on {sorted(used - allowed)}"
+          assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
+          print(f"layers: {len(names)} theorems resolve, all within {sorted(allowed)}")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.LAYERS == 'true'
+        with:
+          name: transplant-layers-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/layers/layers.json
+            ${{ runner.temp }}/layer-stats.jsonl
+            ${{ runner.temp }}/layers-load.json
+            ${{ runner.temp }}/layers-load.md
+            ${{ runner.temp }}/statement-ids-layers.json
+            ${{ runner.temp }}/layers-axioms.txt
+          retention-days: 14

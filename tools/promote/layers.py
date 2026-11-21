@@ -28,16 +28,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "closure"))
 import closure as cl  # noqa: E402
 
-EMPTY = cl.EMPTY
-
 
 class Full(cl.Export):
-    """closure.py's reader, with the whole constants of a term (nothing reduced away) and the units the kernel adds together"""
+    """closure.py's reader, with the constants of a declaration as they stand (nothing reduced away) and the units the kernel adds together"""
 
     def __init__(self) -> None:
         super().__init__()
         self.name_is_num: set[int] = set()
-        self.full: dict[int, int] = {}
         self.unit_of: dict[int, int] = {}  # declared constant -> the first name of its unit
         self.members: dict[int, list[int]] = {}  # first name of a unit -> every constant of it
         self.direct_full: dict[int, frozenset[int]] = {}
@@ -67,44 +64,40 @@ class Full(cl.Export):
             i = self.name_pre[i]
         return parts[::-1]
 
-    def full_terms(self, roots: list[int]) -> None:
-        fm, kind, a, b, c = self.full, self.kind, self.a, self.b, self.c
-        seen: set[int] = set()
-        stack = [r for r in roots if r not in fm]
-        while stack:
-            t = stack.pop()
-            if t in seen or t in fm:
-                continue
-            seen.add(t)
-            stack.extend(self.children_of(kind[t], a[t], b[t], c[t]))
-        for t in sorted(seen):  # children before parents
-            k = kind[t]
-            if k == cl.CONST:
-                fm[t] = self.single(a[t])
-            elif k in (cl.BVAR, cl.SORT, cl.LIT):
-                fm[t] = EMPTY
-            elif k == cl.MDATA:
-                fm[t] = fm[a[t]]
-            elif k == cl.PROJ:
-                fm[t] = self.union(fm[a[t]], self.single(b[t]))
-            elif k == cl.LET:
-                fm[t] = self.union(self.union(fm[a[t]], fm[b[t]]), fm[c[t]])
-            else:  # LAM, PI, APP
-                fm[t] = self.union(fm[a[t]], fm[b[t]])
-
     def unit_direct(self, first: int) -> frozenset[int]:
-        """the units one unit's constants mention (itself left out), from their types, values and recursor rules"""
+        """the units one unit's constants mention (itself left out), from their types, values and recursor rules.
+
+        One walk of the terms below the unit's declarations, with a set of the terms already seen in that walk: the memory is the size of one declaration's term, never of the export (a set of constants for
+        every term of a 2 GB export would hold, for the large proofs, more constants than there are terms). A term shared with another declaration is walked again for that one: the cost is the sum of
+        the declarations' own term sizes."""
         d = self.direct_full.get(first)
         if d is None:
-            terms: list[int] = []
+            kind, a, b, c = self.kind, self.a, self.b, self.c
+            consts: set[int] = set()
+            seen: set[int] = set()
+            stack: list[int] = []
             for m in self.members[first]:
                 ty, val, extra = self.decl[m]
-                terms += [ty, *extra] + ([val] if val >= 0 else [])
-            self.full_terms(terms)
-            s = EMPTY
-            for t in terms:
-                s = self.union(s, self.full[t])
-            d = frozenset(self.unit_of[x] for x in self.sets[s] if x in self.unit_of) - {first}
+                stack.extend([ty, *extra] + ([val] if val >= 0 else []))
+            while stack:
+                t = stack.pop()
+                if t in seen:
+                    continue
+                seen.add(t)
+                k = kind[t]
+                if k == cl.CONST:
+                    consts.add(a[t])
+                elif k == cl.PROJ:
+                    consts.add(b[t])
+                    stack.append(a[t])
+                elif k in (cl.APP, cl.LAM, cl.PI):
+                    stack.append(a[t])
+                    stack.append(b[t])
+                elif k == cl.LET:
+                    stack.extend((a[t], b[t], c[t]))
+                elif k == cl.MDATA:
+                    stack.append(a[t])
+            d = frozenset(self.unit_of[x] for x in consts if x in self.unit_of) - {first}
             self.direct_full[first] = d
         return d
 
