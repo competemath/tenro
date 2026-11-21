@@ -145,10 +145,17 @@ jobs:
             out="$RUNNER_TEMP/out-$label"
             mkdir -p "$out"
             rc=0
-            /usr/bin/time -v "$replay" "$export_file" --module "$module" --out "$out" > "$RUNNER_TEMP/replay-$label-stats.json" 2> "$RUNNER_TEMP/replay-$label-time.txt" || rc=$?
+            # --stub-refused: a definition the kernel still refuses (it has to compute through a proof that the export left out) becomes an axiom of its type and is listed, instead of stopping the replay at the first
+            /usr/bin/time -v "$replay" "$export_file" --module "$module" --out "$out" --stub-refused > "$RUNNER_TEMP/replay-$label-stats.json" 2> "$RUNNER_TEMP/replay-$label-time.txt" || rc=$?
             echo "== $label: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/replay-$label-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
             if [ "$rc" != 0 ]; then echo "$label: replay exit $rc; the reason:"; grep -v "^\s" "$RUNNER_TEMP/replay-$label-time.txt" | head -40; continue; fi
-            head -c 1200 "$RUNNER_TEMP/replay-$label-stats.json"; echo
+            python3 - "$RUNNER_TEMP/replay-$label-stats.json" "$RUNNER_TEMP/refused-$label.txt" <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, sys
+          st = json.loads(open(sys.argv[1], encoding="utf-8").read().strip().splitlines()[-1])["replay"]
+          names = st.pop("refused", [])
+          open(sys.argv[2], "w", encoding="utf-8").write("".join(n + "\n" for n in names))
+          print(f"replay: {json.dumps(st, sort_keys=True)}; {len(names)} declarations were refused by the kernel and stand as axioms of their type" + (f", for example {names[:5]}" if names else ""))
+          PY
             olean="$out/${module//./\/}.olean"
             ls -l "$olean"
             printf 'import %s\n' "$module" > "$RUNNER_TEMP/import-$label.lean"
@@ -166,6 +173,7 @@ jobs:
             ${{ runner.temp }}/sample-stmt-stats.json
             ${{ runner.temp }}/tree-stmt-stats.json
             ${{ runner.temp }}/replay-*-stats.json
+            ${{ runner.temp }}/refused-*.txt
             ${{ runner.temp }}/replay-*-time.txt
             ${{ runner.temp }}/import-*.json
           retention-days: 30
