@@ -27,6 +27,10 @@ The statement-only closure of the wide sample (4,778 theorems of 16 libraries; r
 
 Opaque constants stubbed too changes nothing (41,419 units). The terms are per-unit sums (a term shared by two units counts twice): a measure of size, not the size of the export.
 
+The same question for Lean core alone, from the exports themselves (workflow `export-statements`, run 44951869407, `Init` exported both ways): the full export is 6,483,244 lines and 347 MB (59,591 declarations, 6.13 M terms); with `--statements` 1,008,897 lines and 59 MB (46,473 declarations, 0.83 M terms), 15.6 % of the lines and 13.5 % of the terms.
+
+**The exporter shares terms up to binder names and binder info.** `lean4export` writes a term once, with the binder names and annotations of the first alpha-equivalent term it met (Lean's `Expr.eqv` ignores both), so which names a declaration carries depends on what was visited before it, and leaving the proofs out changes that. The first comparison of the two `Init` exports, which treated names and info as part of a term, reported 3,215 changed declarations for that reason alone; `compare_exports.py` now compares terms up to them and counts the declarations that differ only so (`binder_names_only`). A replay restores the names and annotations of the source from Tengoku's environment (`bi` rows), so the replayed statements are the source's.
+
 ## What it does not say, yet
 
 * **Coverage.** That closure holds what the 4,778 *statements* reach. A base also needs the lemmas of the seed (Mathlib) that no promoted statement mentions: the whole tree has to be exported as statements (the workflow's job), not a sample.
