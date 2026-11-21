@@ -44,10 +44,10 @@ class Planning(unittest.TestCase):
     def test_a_constant_two_topics_need_is_in_the_foundation_and_one_topic_needs_is_in_its_layer(self):
         p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
         self.assertEqual(names(p, "TengaiData.Foundation"), ["T", "base", "shared"])
-        self.assertEqual(names(p, "TengaiData.Alpha"), ["A1", "only_a"])
-        self.assertEqual(names(p, "TengaiData.Beta"), ["B1"])
+        self.assertEqual(names(p, "TengaiData.Topic.Alpha"), ["A1", "only_a"])
+        self.assertEqual(names(p, "TengaiData.Topic.Beta"), ["B1"])
         self.assertEqual(
-            [x["module"] for x in p["layers"]], ["TengaiData.Foundation", "TengaiData.Alpha", "TengaiData.Beta"]
+            [x["module"] for x in p["layers"]], ["TengaiData.Foundation", "TengaiData.Topic.Alpha", "TengaiData.Topic.Beta"]
         )  # the order they must be replayed in
         self.assertEqual([x["imports"] for x in p["layers"]], [[], ["TengaiData.Foundation"], ["TengaiData.Foundation"]])
 
@@ -55,21 +55,21 @@ class Planning(unittest.TestCase):
         p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
         self.assertEqual(
             p["topics"]["alpha"],
-            {"module": "TengaiData.Alpha", "theorems": 1, "own_units": 2, "foundation_units_used": 3, "units_loaded": 5},
+            {"module": "TengaiData.Topic.Alpha", "theorems": 1, "own_units": 2, "foundation_units_used": 3, "units_loaded": 5},
         )
         self.assertEqual(p["topics"]["beta"]["units_loaded"], 4)  # B1 and what it reaches: shared, base, T
         self.assertEqual(p["totals"], {"units": 6, "foundation_units": 3, "constants": 6})
 
     def test_one_topic_has_no_foundation(self):
         p = run(two_topics(), {"only": ["A1", "B1"]})
-        self.assertEqual([x["module"] for x in p["layers"]], ["TengaiData.Only"])
+        self.assertEqual([x["module"] for x in p["layers"]], ["TengaiData.Topic.Only"])
         self.assertEqual(p["layers"][0]["imports"], [])
         self.assertEqual(p["totals"]["foundation_units"], 0)
 
     def test_a_theorem_another_topic_needs_is_in_the_foundation(self):
         p = run(two_topics(), {"alpha": ["A1", "shared"], "beta": ["B1"]})  # alpha names `shared` as its own theorem; beta needs it too
         self.assertIn("shared", names(p, "TengaiData.Foundation"))
-        self.assertNotIn("shared", names(p, "TengaiData.Alpha"))
+        self.assertNotIn("shared", names(p, "TengaiData.Topic.Alpha"))
 
     def test_a_constant_the_core_holds_is_left_to_the_core(self):
         p = run(
@@ -122,9 +122,13 @@ class Planning(unittest.TestCase):
         with self.assertRaises(SystemExit):
             run(two_topics(), {"a-b": ["A1"], "a_b": ["B1"]})
         with self.assertRaises(SystemExit):
-            run(two_topics(), {"foundation": ["A1"], "b": ["B1"]})
-        with self.assertRaises(SystemExit):
             run(two_topics(), {"1abc": ["A1"]})
+
+    def test_a_topic_called_foundation_is_a_topic_and_not_the_foundation(self):
+        # Tengoku has a library called `foundation`: topic layers live under `Topic.`, so it cannot take the foundation's module name
+        p = run(two_topics(), {"foundation": ["A1"], "b": ["B1"]})
+        self.assertEqual([x["module"] for x in p["layers"]], ["TengaiData.Foundation", "TengaiData.Topic.Foundation", "TengaiData.Topic.B"])
+        self.assertEqual(p["layers"][1]["imports"], ["TengaiData.Foundation"])
 
     def test_the_plan_is_deterministic(self):
         a = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
@@ -136,12 +140,12 @@ class Planning(unittest.TestCase):
         b.decl("thm", "C1", b.const("T"), b.const("only_a"))  # gamma reaches only_a too: alpha and gamma share it
         p = run(b, {"alpha": ["A1"], "beta": ["B1"], "gamma": ["C1"]})
         self.assertIn("only_a", names(p, "TengaiData.Foundation"))
-        self.assertEqual(names(p, "TengaiData.Gamma"), ["C1"])
+        self.assertEqual(names(p, "TengaiData.Topic.Gamma"), ["C1"])
 
     def test_the_foundation_never_depends_on_a_topic_layer(self):
         p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
         foundation = set(names(p, "TengaiData.Foundation"))
-        self.assertEqual(foundation & set(names(p, "TengaiData.Alpha")), set())
+        self.assertEqual(foundation & set(names(p, "TengaiData.Topic.Alpha")), set())
         self.assertNotIn("only_a", foundation)  # only_a is alpha's, and nothing in the foundation reaches it
 
 
@@ -177,9 +181,9 @@ class CommandLine(unittest.TestCase):
             plan = json.loads((t / "out" / "layers.json").read_text())
             self.assertEqual(
                 [x["file"] for x in plan["layers"]],
-                ["TengaiData.Foundation.names.jsonl", "TengaiData.Alpha.names.jsonl", "TengaiData.Beta.names.jsonl"],
+                ["TengaiData.Foundation.names.jsonl", "TengaiData.Topic.Alpha.names.jsonl", "TengaiData.Topic.Beta.names.jsonl"],
             )
-            self.assertEqual((t / "out" / "TengaiData.Beta.names.jsonl").read_text(), '["B1"]\n')
+            self.assertEqual((t / "out" / "TengaiData.Topic.Beta.names.jsonl").read_text(), '["B1"]\n')
             self.assertEqual(
                 (t / "out" / "TengaiData.Foundation.names.jsonl").read_text().splitlines(), ['["T"]', '["base"]', '["shared"]']
             )

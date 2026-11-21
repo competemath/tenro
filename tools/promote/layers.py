@@ -136,7 +136,7 @@ def plan(
     modules: dict[str, str] = {}
     for t in topics:
         m = module_component(t)
-        if m == foundation or m in modules.values():
+        if m in modules.values():
             raise SystemExit(f"layers: the topic {t!r} makes the module name {m}, which another topic or the foundation has")
         modules[t] = m
     placed = {u for u in ex.members if universe is None or tuple(ex.components(u)) in universe}
@@ -165,7 +165,7 @@ def plan(
         units = sorted((u for u, name in layer_of.items() if name == layer), key=lambda u: ex.name(u))
         if not units:
             continue
-        module = f"{prefix}.{foundation if layer == foundation else modules[layer]}"
+        module = f"{prefix}.{foundation}" if layer == foundation else f"{prefix}.Topic.{modules[layer]}"
         names_out[module] = [ex.components(u) for u in units]
         out_layers.append(
             {
@@ -184,7 +184,7 @@ def plan(
         own = sum(1 for u, name in layer_of.items() if name == t)
         shared = sum(1 for u, name in layer_of.items() if name == foundation and users[u] >> order.index(t) & 1)
         per_topic[t] = {
-            "module": f"{prefix}.{modules[t]}",
+            "module": f"{prefix}.Topic.{modules[t]}",
             "theorems": len(topics[t]),
             "own_units": own,
             "foundation_units_used": shared,

@@ -41,15 +41,17 @@ def split_id(ident: str) -> tuple[str, str, str, str] | None:
     return (".".join(parts[:-3]), vars_, parts[-1], f"{hyps}h.{parts[-2]}")
 
 
-def compare(names: list[str], source: dict[str, str], replayed: dict[str, str]) -> dict:
-    """equal: the same id. drift: the same statement (kind, variables and canonical hash) whose hypothesis count or size class differs: isnad reads those off the telescope and the node count,
+def compare(names: list[str], source: dict[str, str], replayed: dict[str, str], unchecked: frozenset[str] = frozenset()) -> dict:
+    """unchecked: names whose sample row has no statement id by construction (a sample of the intake manifests: no isnad pass): they are counted (`no_source_id`), not compared, and not a failure.
+    equal: the same id. drift: the same statement (kind, variables and canonical hash) whose hypothesis count or size class differs: isnad reads those off the telescope and the node count,
     which depend on what the environment knows (a reducible definition; expression metadata the replay does not carry), not on the statement. different: anything else, a changed statement."""
-    missing_source = [n for n in names if n not in source]
-    missing_replayed = [n for n in names if n in source and n not in replayed]
+    checked = [n for n in names if n not in unchecked]
+    missing_source = [n for n in checked if n not in source]
+    missing_replayed = [n for n in checked if n in source and n not in replayed]
     different: list[dict] = []
     drift: list[dict] = []
     equal = 0
-    for n in names:
+    for n in checked:
         if n not in source or n not in replayed:
             continue
         a_id, b_id = source[n], replayed[n]
@@ -66,10 +68,11 @@ def compare(names: list[str], source: dict[str, str], replayed: dict[str, str]) 
         "names": len(names),
         "equal": equal,
         "drift": drift,
+        "no_source_id": len(names) - len(checked),
         "missing_in_source": missing_source,
         "missing_in_replayed": missing_replayed,
         "different": different,
-        "ok": equal + len(drift) == len(names),
+        "ok": equal + len(drift) == len(checked),
     }
 
 
@@ -88,15 +91,17 @@ def main(argv: list[str] | None = None) -> int:
     isnad = load_module(Path(a.isnad_py))
     names = [n for n in Path(a.names).read_text(encoding="utf-8").splitlines() if n.strip()]
     wanted = set(names)
+    unchecked: frozenset[str] = frozenset()
     if a.source_jsonl:
         rows = [json.loads(ln) for ln in Path(a.source_jsonl).read_text(encoding="utf-8").splitlines() if ln.strip()]
-        source = {r["name"]: r["id"] for r in rows if r["name"] in wanted}
+        source = {r["name"]: r["id"] for r in rows if r["name"] in wanted and r.get("id")}
+        unchecked = frozenset(r["name"] for r in rows if r["name"] in wanted and not r.get("id"))
     elif a.source:
         source = ids_of(isnad, Path(a.source).read_text(encoding="utf-8").splitlines(), wanted)
     else:
         ap.error("give --source or --source-jsonl")
     replayed = ids_of(isnad, Path(a.replayed).read_text(encoding="utf-8").splitlines(), wanted)
-    report = compare(names, source, replayed)
+    report = compare(names, source, replayed, unchecked)
     text = json.dumps(report, sort_keys=True)
     if a.out:
         Path(a.out).write_text(text + "\n", encoding="utf-8")
