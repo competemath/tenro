@@ -354,10 +354,14 @@ jobs:
               print(layer["module"], layer["file"], *layer["imports"])
           PY
           : > "$RUNNER_TEMP/layer-stats.jsonl"
+          # the export is parsed once and every layer replays from the parsed file: a layer is its own process (tengai ADR-0005), and one that read the export again spent more than a minute of reading
+          # on it (wide run 2: 45 million lines, 17 layers, 31 minutes)
+          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
           while read -r module file imports; do
             read -r -a wanted <<< "$imports"
             args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
-            /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --ext "$RUNNER_TEMP/ext.jsonl" "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
+            /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --ext "$RUNNER_TEMP/ext.jsonl" "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
             echo "$module: $(grep -E 'Elapsed' "$RUNNER_TEMP/layer-time.txt")"
           done < "$RUNNER_TEMP/layer-order.txt"
           find "$RUNNER_TEMP/layered" -name '*.olean' -printf '%s %P\n' | sort -k2
