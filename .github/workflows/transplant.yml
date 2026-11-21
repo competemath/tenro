@@ -113,7 +113,9 @@ jobs:
           wc -lc "$RUNNER_TEMP/sample.ndjson"
           # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (a manifest name need not be the tree's name: Physlib): taken out of the sample, counted, never silent
           cd "$GITHUB_WORKSPACE"
-          python3 tools/promote/missing.py --err "$RUNNER_TEMP/export.err" --names "$RUNNER_TEMP/names.txt" $([ -s "$RUNNER_TEMP/sample.jsonl" ] && echo --sample "$RUNNER_TEMP/sample.jsonl") --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          sample_args=()
+          if [ -s "$RUNNER_TEMP/sample.jsonl" ]; then sample_args=(--sample "$RUNNER_TEMP/sample.jsonl"); fi
+          python3 tools/promote/missing.py --err "$RUNNER_TEMP/export.err" --names "$RUNNER_TEMP/names.txt" "${sample_args[@]}" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Layers: the plan (which layer each constant of the sample belongs to)"
         if: env.LAYERS == 'true'
         continue-on-error: true   # the planner reads a 2 GB export in Python: if it fails, the one-module pipeline below still runs and the layer steps say why they cannot
