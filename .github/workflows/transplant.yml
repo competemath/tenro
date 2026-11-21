@@ -141,7 +141,7 @@ jobs:
           ls -l "$RUNNER_TEMP/layers/layers.json"
       - name: tengai-replay from core/ (kernel replay into Lean core alone, then the extension entries put back)
         run: |
-          (cd core && lake build tengai-replay tengai-extinfo tengai-typeinfo 2>&1 | tail -3)
+          (cd core && lake build tengai-replay tengai-extinfo tengai-typeinfo tengai-canon 2>&1 | tail -3)
           mkdir -p "$RUNNER_TEMP/out"
           replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
           ext_args=()
@@ -467,6 +467,18 @@ jobs:
           assert seen == set(names), f"axioms printed for {len(seen)} of {len(names)} theorems"
           print(f"layers: {len(names)} theorems resolve, all within {sorted(allowed)}")
           PY
+      - name: "Layers: the canonical form of what was promoted (tengai-canon over every layer: a measurement, not a gate)"
+        if: env.LAYERS == 'true'
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/layered:$core_path"
+          mods=(); while read -r module _; do mods+=(--module "$module"); done < "$RUNNER_TEMP/layer-order.txt"
+          # the checker exits 1 when it finds a violation: that is its answer here, not a failure of the step (2 is a usage error)
+          rc=0; lake exe tengai-canon "${mods[@]}" > "$RUNNER_TEMP/canon.tsv" 2> "$RUNNER_TEMP/canon.err" || rc=$?
+          [ "$rc" -le 1 ] || { head -20 "$RUNNER_TEMP/canon.err"; exit 1; }
+          cd ..
+          python3 tools/promote/canon_report.py "$RUNNER_TEMP/canon.tsv" --layers "$RUNNER_TEMP/layers/layers.json" --layer-stats "$RUNNER_TEMP/layer-stats.jsonl" --out "$RUNNER_TEMP/canon-report.json" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
       - name: "Layers: the layered modules read back out of their .olean files and checked again by nanoda (invariant I1, across the layers)"
         if: env.LAYERS == 'true'
         run: |
@@ -531,6 +543,7 @@ jobs:
             ${{ runner.temp }}/layers-load.md
             ${{ runner.temp }}/statement-ids-layers.json
             ${{ runner.temp }}/layers-axioms.txt
+            ${{ runner.temp }}/canon-report.json
             ${{ runner.temp }}/manifest-layers.json
             ${{ runner.temp }}/snapshot-layers.tar.zst
             ${{ runner.temp }}/snapshot-layers.sha256
