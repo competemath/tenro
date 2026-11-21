@@ -146,14 +146,14 @@ jobs:
           replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
           ext_args=()
           if [ "$EXTENSIONS" = true ]; then
-            # pass 1 only finds which constants were added (its module is thrown away); the extension entries of exactly those are read in Tengoku's environment
-            mkdir -p "$RUNNER_TEMP/out1"
-            "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out1" --added "$RUNNER_TEMP/added.jsonl" > /dev/null
+            # pass 1 only finds which constants were added: the export is parsed once (the table file; every layer of a promotion replays from it) and the names are read off it, with no kernel replay
+            # (a replay of the whole export took 19 of the 55 minutes of a wide run); the extension entries of exactly those names are read in Tengoku's environment
+            "$replay" "$RUNNER_TEMP/sample.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" > /dev/null
+            "$replay" --tables "$RUNNER_TEMP/tables.olean" --added-only "$RUNNER_TEMP/added.jsonl"
             wc -l "$RUNNER_TEMP/added.jsonl"
             (cd .tengoku && lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo" "$RUNNER_TEMP/added.jsonl" Tengoku.All) > "$RUNNER_TEMP/ext.jsonl" 2> "$RUNNER_TEMP/extinfo.err"
             tail -1 "$RUNNER_TEMP/extinfo.err"
             wc -l "$RUNNER_TEMP/ext.jsonl"
-            rm -rf "$RUNNER_TEMP/out1"
             ext_args=(--ext "$RUNNER_TEMP/ext.jsonl")
           fi
           if [ "$LAYERS_ONLY" = true ]; then echo "layers_only: the one module is not replayed; the layers need the extension entries (ext.jsonl) and nothing else of this step"; exit 0; fi
@@ -356,8 +356,11 @@ jobs:
           : > "$RUNNER_TEMP/layer-stats.jsonl"
           # the export is parsed once and every layer replays from the parsed file: a layer is its own process (tengai ADR-0005), and one that read the export again spent more than a minute of reading
           # on it (wide run 2: 45 million lines, 17 layers, 31 minutes)
-          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
-          echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+          # (pass 1 of the step above wrote the table file; a run that comes here without it writes it now)
+          if [ ! -s "$RUNNER_TEMP/tables.olean" ]; then
+            /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+          fi
           while read -r module file imports; do
             read -r -a wanted <<< "$imports"
             args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
