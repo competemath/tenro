@@ -67,7 +67,12 @@ jobs:
           lake env "$l4e" Init > "$RUNNER_TEMP/init-full.ndjson" 2> "$RUNNER_TEMP/init-full.err"
           lake env "$l4e" Init --statements > "$RUNNER_TEMP/init-stmt.ndjson" 2> "$RUNNER_TEMP/init-stmt.err"
           wc -lc "$RUNNER_TEMP/init-full.ndjson" "$RUNNER_TEMP/init-stmt.ndjson"
-          for f in full stmt; do test ! -s "$RUNNER_TEMP/init-$f.err" || { echo "stderr of the $f export:"; head -20 "$RUNNER_TEMP/init-$f.err"; exit 1; }; done
+          # nothing on stderr but the one line the patch prints (how many theorems are kept with their proofs)
+          for f in full stmt; do
+            grep -v '^lean4export --statements: ' "$RUNNER_TEMP/init-$f.err" > "$RUNNER_TEMP/init-$f.err.rest" || true
+            test ! -s "$RUNNER_TEMP/init-$f.err.rest" || { echo "stderr of the $f export:"; head -20 "$RUNNER_TEMP/init-$f.err.rest"; exit 1; }
+          done
+          grep '^lean4export --statements: ' "$RUNNER_TEMP/init-stmt.err" | tee -a "$GITHUB_STEP_SUMMARY" || true
           cd "$GITHUB_WORKSPACE"
           { echo "### Init, full and with --statements"; echo; echo '```'; python3 tools/export/compare_exports.py "$RUNNER_TEMP/init-full.ndjson" "$RUNNER_TEMP/init-stmt.ndjson" --out "$RUNNER_TEMP/init-compare.json"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
           python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/init-compare.json"))["passed"] else 1)'

@@ -32,16 +32,23 @@
  /--
  Initialize the exporter state from an environment and cli options.
  The `recursorMap` maps each inductive declaration's name to the list
-@@ -71,6 +89,8 @@
+@@ -68,9 +86,15 @@
+           fun
+           | none => some <| NameSet.empty.insert recVal.name
+           | some recNames => some <| recNames.insert recVal.name
++  let statements := cliOptions.any (· == "--statements")
++  let kept := if statements then proofsUsedByDefinitions env else {}
++  if statements then
++    IO.eprintln s!"lean4export --statements: {kept.toList.length} theorems are kept with their proofs, the others are axioms of their type"
    modify fun st => { st with
      exportMData   := cliOptions.any (· == "--export-mdata")
      exportUnsafe  := cliOptions.any (· == "--export-unsafe")
-+    statementsOnly := cliOptions.any (· == "--statements")
-+    keepProofs := if cliOptions.any (· == "--statements") then proofsUsedByDefinitions env else {}
++    statementsOnly := statements
++    keepProofs := kept
      ignoreMissing := cliOptions.any (· == "--ignore-missing")
      recursorMap
    }
-@@ -277,17 +297,30 @@
+@@ -277,17 +301,30 @@
        ])
      ]
    | .thmInfo val => do
