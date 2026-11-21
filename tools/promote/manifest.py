@@ -103,7 +103,13 @@ def build(d: Path, export: Path | None, olean: Path | None, pins: dict[str, str]
             else ({"status": nanoda_status, "declarations": None} if nanoda_status else None),
             "statement_ids": None
             if ids is None
-            else {"names": ids["names"], "equal": ids["equal"], "drift": [d["name"] for d in ids.get("drift", [])], "ok": ids["ok"]},
+            else {
+                "names": ids["names"],
+                "equal": ids["equal"],
+                "drift": [d["name"] for d in ids.get("drift", [])],
+                "no_source_id": ids.get("no_source_id", 0),
+                "ok": ids["ok"],
+            },
             "axioms": axioms_check(axioms_text, names),
             "cold_import_s": None
             if not (empty and with_sample)

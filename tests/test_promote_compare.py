@@ -50,6 +50,50 @@ class Compare(unittest.TestCase):
         r3 = C.compare(["a"], {"a": "dvd.1h3v.s6.397d2ae1b629"}, {"a": "dvd.1h4v.s6.397d2ae1b629"})
         self.assertEqual(len(r3["different"]), 1)
 
+    def test_a_name_without_a_source_id_by_construction_is_counted_and_not_failed(self):
+        # a sample of the intake manifests has no statement ids (no isnad pass): those names are `unchecked`, the others are compared as always
+        r = C.compare(["a", "b", "c"], {"a": "x"}, {"a": "x", "b": "y", "c": "z"}, frozenset({"b", "c"}))
+        self.assertEqual((r["names"], r["equal"], r["no_source_id"], r["missing_in_source"]), (3, 1, 2, []))
+        self.assertTrue(r["ok"])
+        # a name that should have an id and has none in the source is still a failure
+        r2 = C.compare(["a", "b"], {}, {"a": "x", "b": "y"}, frozenset({"b"}))
+        self.assertEqual(r2["missing_in_source"], ["a"])
+        self.assertFalse(r2["ok"])
+        # nothing compared at all (every row unchecked) is not a failure either, and says so
+        r3 = C.compare(["a"], {}, {"a": "x"}, frozenset({"a"}))
+        self.assertTrue(r3["ok"])
+        self.assertEqual((r3["equal"], r3["no_source_id"]), (0, 1))
+
+    def test_main_with_a_sample_that_has_null_ids(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "isnad.py").write_text(ISNAD_PY)
+            (d / "names.txt").write_text("T.a\nT.b\n")
+            (d / "sample.jsonl").write_text(
+                json.dumps({"name": "T.a", "id": None, "library": "l", "module": "M"})
+                + "\n"
+                + json.dumps({"name": "T.b", "id": "eq.1h1v.s5.c2", "library": "l", "module": "M"})
+                + "\n"
+            )
+            (d / "rep.tsv").write_text("\n".join([line("T.a", "c1"), line("T.b", "c2")]) + "\n")
+            code = C.main(
+                [
+                    "--isnad-py",
+                    str(d / "isnad.py"),
+                    "--names",
+                    str(d / "names.txt"),
+                    "--source-jsonl",
+                    str(d / "sample.jsonl"),
+                    "--replayed",
+                    str(d / "rep.tsv"),
+                    "--out",
+                    str(d / "out.json"),
+                ]
+            )
+            r = json.loads((d / "out.json").read_text())
+            self.assertEqual((r["names"], r["no_source_id"]), (2, 1))
+            self.assertEqual(code, 0 if r["ok"] else 1)
+
     def test_all_equal_is_ok(self):
         r = C.compare(["a"], {"a": "x"}, {"a": "x"})
         self.assertTrue(r["ok"])

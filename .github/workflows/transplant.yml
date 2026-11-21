@@ -20,6 +20,10 @@ on:
         description: "Run id of a `candidates` run whose artifact lists the theorems (several libraries, no isnad pass). Empty: sample one library by an isnad pass."
         required: false
         default: ""
+      manifests:
+        description: "Sample the intake manifests of the pinned Tengoku (data/intake/<library>/manifest.jsonl) instead: many libraries, no candidates run and no isnad pass, so no source statement ids (the ids are counted, not compared). `library` then holds intake library keys (aintlib compfiles ...) or `all`"
+        required: false
+        default: "false"
       count:
         description: "How many theorems to transplant"
         required: true
@@ -38,6 +42,7 @@ defaults:
 env:
   LIB: ${{ inputs.library }}
   CAND_RUN: ${{ inputs.candidates_run }}
+  MANIFESTS: ${{ inputs.manifests }}
   EXTENSIONS: ${{ inputs.extensions }}
   LAYERS: ${{ inputs.layers }}
   COUNT: ${{ inputs.count }}
@@ -75,11 +80,14 @@ jobs:
           git checkout -q "$pin"
           lake build tengoku-isnad 2>&1 | tail -3
           echo "TOOLS=$RUNNER_TEMP/tengoku-tools" >> "$GITHUB_ENV"
-      - name: A seeded sample (from a candidates run, over several libraries; or one library by an isnad pass)
+      - name: A seeded sample (from the intake manifests, or a candidates run over several libraries, or one library by an isnad pass)
         run: |
           [[ "$COUNT" =~ ^[0-9]+$ ]] || { echo "bad count"; exit 1; }
-          for l in $LIB; do [[ "$l" =~ ^[A-Za-z0-9_]+$ ]] || { echo "bad library $l"; exit 1; }; done
-          if [ -n "$CAND_RUN" ]; then
+          for l in $LIB; do [[ "$l" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad library $l"; exit 1; }; done
+          if [ "$MANIFESTS" = true ]; then
+            test -d .tengoku/data/intake
+            python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$LIB" --n "$COUNT" --seed "$SEED" --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
+          elif [ -n "$CAND_RUN" ]; then
             [[ "$CAND_RUN" =~ ^[0-9]+$ ]] || { echo "bad run id"; exit 1; }
             mkdir -p "$RUNNER_TEMP/cand"
             gh run download "$CAND_RUN" --repo "$GITHUB_REPOSITORY" -n candidates -D "$RUNNER_TEMP/cand"
@@ -263,7 +271,7 @@ jobs:
           m = json.load(open(f"{t}/manifest.json"))
           print(f"libraries in the sample: {', '.join(m['libraries']) or 'one library by isnad'}; gzip -6: {m['artifact']['olean']['gzip_bytes']/1e6:.1f} MB")
           ids = json.load(open(f"{t}/statement-ids.json"))
-          print(f"statement ids (promotion lens): {ids['equal']} of {ids['names']} equal, {len(ids.get('drift', []))} drift (same hash, other hypothesis count or size class), {len(ids['different'])} different, {len(ids['missing_in_replayed'])} missing in the replayed module")
+          print(f"statement ids (promotion lens): {ids['equal']} of {ids['names']} equal, {len(ids.get('drift', []))} drift (same hash, other hypothesis count or size class), {len(ids['different'])} different, {len(ids['missing_in_replayed'])} missing in the replayed module" + (f", {ids['no_source_id']} without a source id (a manifest sample)" if ids.get("no_source_id") else ""))
           import re
           checked = re.findall(r"Checked (\d+) declarations with no errors", open(f"{t}/nanoda.out").read())
           print(f"independent check (nanoda): {open(f'{t}/nanoda.status').read().strip()}; " + (f"{checked[-1]} declarations checked" if checked else "no success line"))
@@ -342,7 +350,7 @@ jobs:
           import json, os
           p = json.load(open(os.path.join(os.environ["RUNNER_TEMP"], "layers", "layers.json")))
           for layer in p["layers"]:
-              print(layer["module"].split(".")[-1], layer["module"])
+              print(layer["module"].removeprefix("TengaiData.").replace(".", "_"), layer["module"])  # Foundation, Topic_Aintlib, ...: one label each, even for a topic called foundation
           print("All", *[x["module"] for x in p["layers"]])
           PY
           while read -r label modules; do
