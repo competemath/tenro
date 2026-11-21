@@ -1,0 +1,83 @@
+# A minimal reproduction for the statements export (docs/statements.md): a small Lean file (tests/fixtures/statements/Repro.lean) is compiled against Lean core alone, exported both ways (full, --statements), the
+# two exports are compared (tools/export/compare_exports.py), and each is replayed through the kernel (tengai-replay from core/). No Tengoku: minutes, not an hour. Manual. It measures; it changes nothing.
+name: statements-repro
+on:
+  workflow_dispatch:
+    inputs:
+      roots:
+        description: "Names of the file's constants to export (their closure follows), separated by spaces"
+        required: true
+        default: "ratEqv ratEqv_left"
+permissions: {}
+concurrency:
+  group: statements-repro
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  ROOTS: ${{ inputs.roots }}
+  LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+jobs:
+  repro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: lean4export at the pinned commit, with the --statements patch
+        run: |
+          for r in $ROOTS; do [[ "$r" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "bad root $r"; exit 1; }; done
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
+          git -C "$RUNNER_TEMP/lean4export" checkout -q "$LEAN4EXPORT_COMMIT"
+          cd "$RUNNER_TEMP/lean4export"
+          patch -p1 < "$GITHUB_WORKSPACE/tools/export/lean4export-statements.patch"
+          lake build 2>&1 | tail -2
+      - name: tengai-replay from core/
+        run: (cd core && lake build tengai-replay 2>&1 | tail -3)
+      - name: The file compiled against Lean core, and exported both ways
+        run: |
+          mkdir -p "$RUNNER_TEMP/repro"
+          cd core
+          lake env lean -o "$RUNNER_TEMP/repro/Repro.olean" "$GITHUB_WORKSPACE/tests/fixtures/statements/Repro.lean"
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/repro:$core_path"
+          read -ra root_names <<< "$ROOTS"
+          l4e="$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export"
+          lake env "$l4e" Repro -- "${root_names[@]}" > "$RUNNER_TEMP/repro-full.ndjson"
+          lake env "$l4e" Repro -- "${root_names[@]}" --statements > "$RUNNER_TEMP/repro-stmt.ndjson"
+          wc -lc "$RUNNER_TEMP/repro-full.ndjson" "$RUNNER_TEMP/repro-stmt.ndjson"
+      - name: The two exports compared
+        run: |
+          python3 tools/export/compare_exports.py "$RUNNER_TEMP/repro-full.ndjson" "$RUNNER_TEMP/repro-stmt.ndjson" --out "$RUNNER_TEMP/repro-compare.json" | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Each export replayed through the kernel (tengai-replay)
+        run: |
+          replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
+          for label in full stmt; do
+            mkdir -p "$RUNNER_TEMP/out-$label"
+            rc=0
+            "$replay" "$RUNNER_TEMP/repro-$label.ndjson" --module "TengaiData.Repro${label^}" --out "$RUNNER_TEMP/out-$label" > "$RUNNER_TEMP/replay-$label.json" 2> "$RUNNER_TEMP/replay-$label.err" || rc=$?
+            echo "== $label: exit $rc; $(head -c 300 "$RUNNER_TEMP/replay-$label.json")"
+            grep -v "^\s" "$RUNNER_TEMP/replay-$label.err" | head -30 || true
+            echo "$label exit $rc" >> "$RUNNER_TEMP/replay-summary.txt"
+          done
+          { echo "### replay"; echo '```'; cat "$RUNNER_TEMP/replay-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: statements-repro-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/repro-full.ndjson
+            ${{ runner.temp }}/repro-stmt.ndjson
+            ${{ runner.temp }}/repro-compare.json
+            ${{ runner.temp }}/replay-*.json
+            ${{ runner.temp }}/replay-*.err
+          retention-days: 7
+          if-no-files-found: warn
