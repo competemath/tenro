@@ -40,7 +40,7 @@
 +          ("name", ← dumpName val.name),
 +          ("levelParams", ← dumpUparams val.levelParams),
 +          ("type", ← dumpExpr val.type),
-+          ("isUnsafe", false)
++          ("isUnsafe", (false : Bool))
 +        ])
 +      ]
 +    else
