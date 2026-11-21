@@ -394,13 +394,22 @@ jobs:
           rows.append(("TengaiData.Sample (one module)", mono / 1e6, cmp["OneModule"]))
           for label, mb, r in rows:
               print(f"| {label} | {mb:.1f} | {r['median']} | {r['net_median']:.3f} | {r['net_min']:.3f} |")
-          print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load 0.25 s")
+          import tomllib
+
+          cap = tomllib.load(open("perf-budget.toml", "rb"))["load"]["cap_net_median_s"]  # the absolute cap of design fix 1, the file the performance gate reads
+          print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load {cap} s (net, paired median)")
+          # a SESSION loads the foundation and one topic: that is what the cap is about (all the layers and the one module are listed for comparison)
+          over = [label for label, _, r in rows if label.startswith("Topic_") and r["net_median"] > cap]
+          over += [label for label, _, r in rows if label == "Foundation" and r["net_median"] > cap]
+          print(f"sessions over the cap: {', '.join(over) if over else 'none'}")
           zs = {}
           for layer in p["layers"]:
               path = f"{t}/layered/" + layer["module"].replace(".", "/") + ".olean"
               zs[layer["module"]] = int(subprocess.run(f"zstd -3 -c {path} | wc -c", shell=True, capture_output=True, text=True).stdout.split()[0])
           print("\nzstd -3 of each layer (MB): " + ", ".join(f"{m.split('.')[-1]} {v / 1e6:.1f}" for m, v in zs.items()))
           json.dump({"rows": [[label, mb, r] for label, mb, r in rows], "empty": empty, "olean": size, "zstd3": zs, "one_module": mono}, open(f"{t}/layers-load.json", "w"))
+          if over:
+              raise SystemExit(1)
           PY
       - name: "Layers: the same statements (isnad ids of every layer against Tengoku's)"
         if: env.LAYERS == 'true'
