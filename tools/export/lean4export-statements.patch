@@ -90,3 +90,18 @@
    | .quotInfo _ =>
      -- Always dump full Quot package in the sensible order
      dumpConstant ``Eq
+--- a/Main.lean
++++ b/Main.lean
+@@ -10,6 +10,12 @@
+   let constants := match constants.tail? with
+     | some cs => cs.map fun c => Syntax.decodeNameLit ("`" ++ c) |>.get!
+     | none    => env.constants.toList.map Prod.fst |>.filter (!·.isInternal)
++  -- `--names-file=FILE`: the constants to export, one name a line (a list of hundreds of thousands does not fit on a command line)
++  let constants ← match opts.findSome? fun o => if o.startsWith "--names-file=" then some (o.splitOn "=").getLast! else none with
++    | some f => do
++      let lines ← IO.FS.lines f
++      pure (lines.toList.filter (!·.isEmpty) |>.map fun c => Syntax.decodeNameLit ("`" ++ c) |>.get!)
++    | none => pure constants
+   M.run env do
+     let _ ← initState env opts
+     dumpMetadata
