@@ -20,6 +20,10 @@ on:
         description: "Run id of a `candidates` run whose artifact lists the theorems (several libraries, no isnad pass). Empty: sample one library by an isnad pass."
         required: false
         default: ""
+      layers_only:
+        description: "With layers=true, skip the one-module pipeline after the extension entries are read (its second replay, import time, statement ids, nanoda, snapshot): the layers are the measurement, and for many libraries the one module is hours of runner for nothing the layers do not say"
+        required: false
+        default: "false"
       manifests:
         description: "Sample the intake manifests of the pinned Tengoku (data/intake/<library>/manifest.jsonl) instead: many libraries, no candidates run and no isnad pass, so no source statement ids (the ids are counted, not compared). `library` then holds intake library keys (aintlib compfiles ...) or `all`"
         required: false
@@ -43,6 +47,7 @@ env:
   LIB: ${{ inputs.library }}
   CAND_RUN: ${{ inputs.candidates_run }}
   MANIFESTS: ${{ inputs.manifests }}
+  LAYERS_ONLY: ${{ inputs.layers_only }}
   EXTENSIONS: ${{ inputs.extensions }}
   LAYERS: ${{ inputs.layers }}
   COUNT: ${{ inputs.count }}
@@ -151,12 +156,14 @@ jobs:
             rm -rf "$RUNNER_TEMP/out1"
             ext_args=(--ext "$RUNNER_TEMP/ext.jsonl")
           fi
+          if [ "$LAYERS_ONLY" = true ]; then echo "layers_only: the one module is not replayed; the layers need the extension entries (ext.jsonl) and nothing else of this step"; exit 0; fi
           if ! /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" "${ext_args[@]}" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"; then
             echo "--- tengai-replay stderr (the reason) ---"; grep -v "^\s" "$RUNNER_TEMP/replay-time.txt" | head -60; exit 1
           fi
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt"
           ls -l "$RUNNER_TEMP/out/TengaiData/Sample.olean"
       - name: The cold import, against an empty module, and the axioms of the sample
+        if: env.LAYERS_ONLY != 'true'
         run: |
           cd core
           core_path="$(lake env printenv LEAN_PATH)"
@@ -170,6 +177,7 @@ jobs:
           lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/axioms.txt"
           head -4 "$RUNNER_TEMP/axioms.txt"
       - name: Instances found in the built module (informational - what a prover on a concrete goal needs)
+        if: env.LAYERS_ONLY != 'true'
         run: |
           cd core
           core_path="$(lake env printenv LEAN_PATH)"
@@ -178,6 +186,7 @@ jobs:
           lake env lean "$RUNNER_TEMP/synth.lean" > "$RUNNER_TEMP/synth.txt" 2>&1 || true
           head -20 "$RUNNER_TEMP/synth.txt"
       - name: "The statements are the statements (the promotion lens: isnad ids of the replayed theorems against Tengoku's)"
+        if: env.LAYERS_ONLY != 'true'
         run: |
           core_path="$(cd "$TOOLS" && lake env printenv LEAN_PATH)"
           (cd "$TOOLS" && LEAN_PATH="$RUNNER_TEMP/out:$core_path" "$TOOLS/.lake/build/bin/tengoku-isnad" --module TengaiData.Sample) > "$RUNNER_TEMP/isnad-replayed.tsv" 2> "$RUNNER_TEMP/isnad-replayed.err" || true
@@ -187,6 +196,7 @@ jobs:
           if [ -s "$RUNNER_TEMP/sample.jsonl" ]; then src=(--source-jsonl "$RUNNER_TEMP/sample.jsonl"); else src=(--source "$RUNNER_TEMP/isnad.tsv"); fi
           python3 tools/promote/compare_ids.py --isnad-py "$TOOLS/scripts/isnad.py" --names "$RUNNER_TEMP/names.txt" "${src[@]}" --replayed "$RUNNER_TEMP/isnad-replayed.tsv" --out "$RUNNER_TEMP/statement-ids.json" || echo "statement ids differ" > "$RUNNER_TEMP/statement-ids.failed"
       - name: "Where a statement that drifted differs (its type, read in Tengoku's environment and in the replayed module)"
+        if: env.LAYERS_ONLY != 'true'
         run: |
           # compare_ids reports a statement whose id differs only in its size class or hypothesis count as drift; this says which part of the expression differs (tools/promote/typeinfo_diff.py). A diagnosis: it fails nothing.
           python3 - <<'PY'
@@ -204,6 +214,7 @@ jobs:
             python3 tools/promote/typeinfo_diff.py "$RUNNER_TEMP/typeinfo-source.jsonl" "$RUNNER_TEMP/typeinfo-replayed.jsonl" --out "$RUNNER_TEMP/typeinfo-diff.json" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
       - name: The built module checked again by nanoda (an independent checker, shares no code with Lean; invariant I1)
+        if: env.LAYERS_ONLY != 'true'
         run: |
           git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
           git -C "$RUNNER_TEMP/nanoda" checkout -q "$NANODA_COMMIT"
@@ -236,6 +247,7 @@ jobs:
           if [ "$(cat "$RUNNER_TEMP/nanoda.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-time.txt"; fi
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-time.txt" || true
       - name: The record of this transplant (manifest) and the compressed size of what it built
+        if: env.LAYERS_ONLY != 'true'
         run: |
           zstd -T0 -3 -q -c "$RUNNER_TEMP/out/TengaiData/Sample.olean" | wc -c | tee "$RUNNER_TEMP/olean-zstd-bytes.txt"
           python3 tools/promote/manifest.py --dir "$RUNNER_TEMP" --out "$RUNNER_TEMP/manifest.json" --export "$RUNNER_TEMP/sample.ndjson" --olean "$RUNNER_TEMP/out/TengaiData/Sample.olean" \
@@ -243,6 +255,7 @@ jobs:
             --pin "candidates_run=${CAND_RUN:-none}" --pin "seed=$SEED" --pin "count=$COUNT"
           python3 -c 'import json;m=json.load(open("'"$RUNNER_TEMP"'/manifest.json"));o=m["artifact"]["olean"];print("olean",o["bytes"],"gzip",o["gzip_bytes"])'
       - name: The snapshot - packed, compressed, unpacked and verified again, and imported from the unpacked copy
+        if: env.LAYERS_ONLY != 'true'
         run: |
           python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/out" --manifest "$RUNNER_TEMP/manifest.json" --out "$RUNNER_TEMP/snapshot.tar"
           zstd -T0 -12 --long=27 -q -f "$RUNNER_TEMP/snapshot.tar" -o "$RUNNER_TEMP/snapshot.tar.zst"
@@ -256,6 +269,7 @@ jobs:
           LEAN_PATH="$RUNNER_TEMP/unpacked:$core_path" lake env lean "$RUNNER_TEMP/import-only.lean"
           echo "the snapshot imports from its unpacked copy"
       - name: Summary
+        if: env.LAYERS_ONLY != 'true'
         run: |
           python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json, os
@@ -283,6 +297,7 @@ jobs:
           print(f"cold import (median of {len(sample['runs'])}): empty module {empty['median']} s, with the sample {sample['median']} s (net {sample['median']-empty['median']:.3f} s); cap C_load 0.25 s")
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.LAYERS_ONLY != 'true'
         with:
           name: transplant-${{ github.run_id }}
           path: |
@@ -305,6 +320,7 @@ jobs:
             ${{ runner.temp }}/axioms.txt
           retention-days: 14
       - name: The independent check, the statement ids and the axioms must have passed
+        if: env.LAYERS_ONLY != 'true'
         run: |
           test "$(cat "$RUNNER_TEMP/nanoda.status")" = ok
           test ! -e "$RUNNER_TEMP/statement-ids.failed"
@@ -338,10 +354,14 @@ jobs:
               print(layer["module"], layer["file"], *layer["imports"])
           PY
           : > "$RUNNER_TEMP/layer-stats.jsonl"
+          # the export is parsed once and every layer replays from the parsed file: a layer is its own process (tengai ADR-0005), and one that read the export again spent more than a minute of reading
+          # on it (wide run 2: 45 million lines, 17 layers, 31 minutes)
+          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
           while read -r module file imports; do
             read -r -a wanted <<< "$imports"
             args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
-            /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --ext "$RUNNER_TEMP/ext.jsonl" "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
+            /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --ext "$RUNNER_TEMP/ext.jsonl" "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
             echo "$module: $(grep -E 'Elapsed' "$RUNNER_TEMP/layer-time.txt")"
           done < "$RUNNER_TEMP/layer-order.txt"
           find "$RUNNER_TEMP/layered" -name '*.olean' -printf '%s %P\n' | sort -k2
@@ -364,8 +384,10 @@ jobs:
             : > "$RUNNER_TEMP/l-$label.lean"; for m in "${wanted[@]}"; do printf 'import %s\n' "$m" >> "$RUNNER_TEMP/l-$label.lean"; done
             args+=(--target "$label=lake env lean $RUNNER_TEMP/l-$label.lean")
           done < "$RUNNER_TEMP/l-sets.txt"
-          printf 'import TengaiData.Sample\n' > "$RUNNER_TEMP/l-Sample.lean"
-          args+=(--target "OneModule=lake env lean $RUNNER_TEMP/l-Sample.lean")
+          if [ -f "$RUNNER_TEMP/out/TengaiData/Sample.olean" ]; then
+            printf 'import TengaiData.Sample\n' > "$RUNNER_TEMP/l-Sample.lean"
+            args+=(--target "OneModule=lake env lean $RUNNER_TEMP/l-Sample.lean")
+          fi
           # the layers and the one module are different modules: one search path holds both, and every command runs in every round
           LEAN_PATH="$RUNNER_TEMP/layered:$RUNNER_TEMP/out:$core_path" python3 ../tools/promote/import_time.py compare "${args[@]}" > "$RUNNER_TEMP/l-compare.json"
           cd ..
@@ -377,7 +399,8 @@ jobs:
           for layer in p["layers"]:
               path = f"{t}/layered/" + layer["module"].replace(".", "/") + ".olean"
               size[layer["module"]] = os.path.getsize(path)
-          mono = os.path.getsize(f"{t}/out/TengaiData/Sample.olean")
+          one = f"{t}/out/TengaiData/Sample.olean"
+          mono = os.path.getsize(one) if os.path.exists(one) else None  # not built with layers_only
           cmp = json.load(open(f"{t}/l-compare.json"))
           empty = cmp["baseline"]
           print("## what a session loads, layered against one module")
@@ -391,16 +414,26 @@ jobs:
                   loaded.add(m)
                   loaded.update(next(x for x in p["layers"] if x["module"] == m)["imports"])
               rows.append((label, sum(size[m] for m in loaded) / 1e6, cmp[label]))
-          rows.append(("TengaiData.Sample (one module)", mono / 1e6, cmp["OneModule"]))
+          if mono is not None:
+              rows.append(("TengaiData.Sample (one module)", mono / 1e6, cmp["OneModule"]))
           for label, mb, r in rows:
               print(f"| {label} | {mb:.1f} | {r['median']} | {r['net_median']:.3f} | {r['net_min']:.3f} |")
-          print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load 0.25 s")
+          import tomllib
+
+          cap = tomllib.load(open("perf-budget.toml", "rb"))["load"]["cap_net_median_s"]  # the absolute cap of design fix 1, the file the performance gate reads
+          print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load {cap} s (net, paired median)")
+          # a SESSION loads the foundation and one topic: that is what the cap is about (all the layers and the one module are listed for comparison)
+          over = [label for label, _, r in rows if label.startswith("Topic_") and r["net_median"] > cap]
+          over += [label for label, _, r in rows if label == "Foundation" and r["net_median"] > cap]
+          print(f"sessions over the cap: {', '.join(over) if over else 'none'}")
           zs = {}
           for layer in p["layers"]:
               path = f"{t}/layered/" + layer["module"].replace(".", "/") + ".olean"
               zs[layer["module"]] = int(subprocess.run(f"zstd -3 -c {path} | wc -c", shell=True, capture_output=True, text=True).stdout.split()[0])
           print("\nzstd -3 of each layer (MB): " + ", ".join(f"{m.split('.')[-1]} {v / 1e6:.1f}" for m, v in zs.items()))
           json.dump({"rows": [[label, mb, r] for label, mb, r in rows], "empty": empty, "olean": size, "zstd3": zs, "one_module": mono}, open(f"{t}/layers-load.json", "w"))
+          if over:
+              raise SystemExit(1)
           PY
       - name: "Layers: the same statements (isnad ids of every layer against Tengoku's)"
         if: env.LAYERS == 'true'
@@ -444,13 +477,49 @@ jobs:
           # every layer imported: the export holds Lean core and all the layers, so a topic's references into the foundation are checked against the foundation as the olean files hold it
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" > "$RUNNER_TEMP/layered.ndjson"
           wc -lc "$RUNNER_TEMP/layered.ndjson"
-          sed "s|$RUNNER_TEMP/replayed.ndjson|$RUNNER_TEMP/layered.ndjson|" "$RUNNER_TEMP/nanoda.json" > "$RUNNER_TEMP/nanoda-layers.json"
           nanoda="$RUNNER_TEMP/nanoda/target/release/nanoda_bin"
+          if [ ! -x "$nanoda" ]; then   # `layers_only` skips the one-module steps, which build nanoda and write its configuration
+            git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
+            git -C "$RUNNER_TEMP/nanoda" checkout -q "$NANODA_COMMIT"
+            (cd "$RUNNER_TEMP/nanoda" && cargo build --release --locked 2>&1 | tail -2)
+          fi
+          # the export holds all of Lean core, which declares sorryAx and the compiler axioms (as in Tengoku's nightly): nanoda admits them; what the SAMPLE depends on is checked separately, theorem by theorem
+          cat > "$RUNNER_TEMP/nanoda-layers.json" <<JSON
+          {
+            "export_file_path": "$RUNNER_TEMP/layered.ndjson",
+            "use_stdin": false,
+            "permitted_axioms": ["propext", "Classical.choice", "Quot.sound", "sorryAx", "Lean.ofReduceBool", "Lean.ofReduceNat", "Lean.trustCompiler"],
+            "unpermitted_axiom_hard_error": true,
+            "num_threads": 4,
+            "nat_extension": true,
+            "string_extension": true,
+            "print_success_message": true,
+            "pp_to_stdout": true
+          }
+          JSON
           if /usr/bin/time -v "$nanoda" "$RUNNER_TEMP/nanoda-layers.json" > "$RUNNER_TEMP/nanoda-layers.out" 2> "$RUNNER_TEMP/nanoda-layers-time.txt"; then echo ok > "$RUNNER_TEMP/nanoda-layers.status"; else echo FAILED > "$RUNNER_TEMP/nanoda-layers.status"; fi
           checked="$(grep -E 'Checked [0-9]+ declarations with no errors' "$RUNNER_TEMP/nanoda-layers.out" | tail -1 || true)"
           echo "layered modules, independent check (nanoda): $(cat "$RUNNER_TEMP/nanoda-layers.status"); ${checked:-no success line}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-layers-time.txt" || true
           if [ "$(cat "$RUNNER_TEMP/nanoda-layers.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-layers-time.txt"; exit 1; fi
+      - name: "Layers: the record (manifest, schema 2), the snapshot packed, verified and imported from its unpacked copy"
+        if: env.LAYERS == 'true'
+        run: |
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest-layers.json" \
+            --pin "tengoku=$(tr -d '[:space:]' < tengoku.pin)" --pin "core_tag=$(python3 -c 'import json;print(json.load(open("core.lock"))["tag"])')" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "nanoda=$NANODA_COMMIT" \
+            --pin "candidates_run=${CAND_RUN:-none}" --pin "manifests=${MANIFESTS:-false}" --pin "seed=$SEED" --pin "count=$COUNT"
+          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest-layers.json" --out "$RUNNER_TEMP/snapshot-layers.tar"
+          zstd -T0 -12 --long=27 -q -f "$RUNNER_TEMP/snapshot-layers.tar" -o "$RUNNER_TEMP/snapshot-layers.tar.zst"
+          sum="$(sha256sum "$RUNNER_TEMP/snapshot-layers.tar.zst" | cut -d' ' -f1)"
+          echo "$sum  snapshot-layers.tar.zst" > "$RUNNER_TEMP/snapshot-layers.sha256"
+          ls -l "$RUNNER_TEMP/snapshot-layers.tar.zst"
+          python3 tools/release/pack.py verify "$RUNNER_TEMP/snapshot-layers.tar.zst" --sha256 "$sum" --into "$RUNNER_TEMP/unpacked-layers"
+          # what a prover environment does with it: the unpacked directory on LEAN_PATH next to Lean core, every layer imported
+          { while read -r module _; do printf 'import %s\n' "$module"; done < "$RUNNER_TEMP/layer-order.txt"; } > "$RUNNER_TEMP/import-layers.lean"
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          LEAN_PATH="$RUNNER_TEMP/unpacked-layers:$core_path" lake env lean "$RUNNER_TEMP/import-layers.lean"
+          echo "the layered snapshot imports from its unpacked copy: $(stat -c %s "$RUNNER_TEMP/snapshot-layers.tar.zst") bytes, sha256 ${sum:0:16}" | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.LAYERS == 'true'
         with:
@@ -462,4 +531,7 @@ jobs:
             ${{ runner.temp }}/layers-load.md
             ${{ runner.temp }}/statement-ids-layers.json
             ${{ runner.temp }}/layers-axioms.txt
+            ${{ runner.temp }}/manifest-layers.json
+            ${{ runner.temp }}/snapshot-layers.tar.zst
+            ${{ runner.temp }}/snapshot-layers.sha256
           retention-days: 14

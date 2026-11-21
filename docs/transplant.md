@@ -14,7 +14,7 @@ The steps and what each one is for:
 | statement ids | the promotion lens: the isnad id of each replayed theorem against Tengoku's (`tools/promote/compare_ids.py`) |
 | nanoda | the built module exported again and checked by an independent kernel that shares no code with Lean (I1) |
 | manifest, snapshot | what was built, hashed; packed, unpacked and imported again |
-| `layers=true` | the same sample promoted as a foundation and a layer per library, and what a session loads of it (below) |
+| `layers=true` | the same sample promoted as a foundation and a layer per library (the export parsed once, `--save-tables`, each layer replayed from it), what a session loads of it, nanoda over the layers read back from their `.olean` files, the snapshot packed, verified and imported (below) |
 
 ## What it found (5,000 theorems of Aintlib, Compfiles and Azurite; run 44898078379, tengai v0.0.12)
 
@@ -40,4 +40,21 @@ checked across the layers as for the one module. The result is an artifact `tran
 * **Sizes:** olean 402.0 MB (foundation) + 546.0 (Aintlib) + 194.0 (Compfiles) + 178.7 (Azurite) = 1,320.8 MB against 1,263.9 MB for one module (+4.5 %, what each module repeats); zstd -3 138.5 + 184.0 + 65.9 + 60.6 = 449 MB against 431 MB.
 * **What a session loads:** the foundation and Aintlib 948 MB (75 % of the one module), with Compfiles 596 MB (47 %), with Azurite 581 MB (46 %). With three topics the foundation is only 30 % of the whole: most of what a library reaches, only that library reaches.
 * **Cold import (median of 7, net over an empty module):** Foundation +0.062 s, Azurite +0.071, Compfiles +0.083, Aintlib +0.131, all layers +0.128, the one module +0.171 s. These are not a scaling law: the same one module measured +0.083 s in run 44898078379 (empty module 0.199 s there, 0.239 s here), so the runner's noise is as large as the effect. Read as a bound: roughly 0.13 ms per MB loaded, which reaches the cap `C_load` (0.25 s) at about 1.9 GB loaded.
-* **Not done:** the layered modules have not been exported and checked by nanoda (the independent check covers the one module only); and the cost of the layered replay is layers times the export, because each layer's `tengai-replay` reads the whole export again (fine for tens of topics, not for hundreds).
+* **Not done then, done since (below):** the layered modules were not exported and checked by nanoda, and every layer's `tengai-replay` read the whole export again.
+
+### A wide layered run (4,778 theorems of 16 libraries as topics, 17 layers; run 44937592081, tengai v0.0.15)
+
+`manifests=true` samples the intake manifests of the pinned Tengoku (name and module, no isnad pass), `layers_only=true` skips the one-module pipeline, `count=4800`, seed `wide-2`. 22 of the 4,800 sampled names are not constants of the tree (physlib 21, aintlib 1: a manifest name need not be the tree's name)
+and are taken out of the sample and counted (`tools/promote/missing.py`).
+
+* **Replayed by layers, each kernel-checked on its own:** 183,763 constants added (the foundation 85,259, the 16 topics the rest), 10,088 already in Lean core, 2,369 inductive groups. Extension entries: 12,979 reducibility, 5,454 projections, **2,167 structures** (the field and parent information of tengai v0.0.14), 1,136 classes,
+  10,197 instances, 0 refused.
+* **The export is parsed once:** `tengai-replay --save-tables` wrote the parsed export (1,967 MB, 2 min 51 s, 9.4 GB at its peak) and each layer replayed from it (`--tables`). The layers step took **14 min 5 s** including that save; the same sample took 31 min when every layer parsed the export again (run 44926671313: the 15 small layers 1 min 13 s to 1 min 48 s each).
+  From the table file the foundation took 3 min 06 s, Aintlib 4 min 14 s and the 15 small layers 5 to 37 s each (3 min 40 s together).
+* **What a session loads (paired, 9 rounds; empty module about 0.21 s):** the foundation 499.7 MB, +0.043 s net; a session (the foundation and one topic) 512 to 903.6 MB, at most +0.072 s (Aintlib, the largest topic); all 17 layers 1,626 MB, +0.107 s. The cap `C_load` is 0.25 s: no session is over it.
+  An earlier run of the same sample (44926671313) measured +0.055 s, up to +0.083 s and +0.117 s: the runner's noise is about 0.01 s. Compressed (zstd -3) the foundation is 173 MB and all layers about 554 MB.
+* **Independent check across the layers:** the layered modules read back out of their `.olean` files, exported (50.2 million lines, 2.75 GB) and checked by nanoda: 248,691 declarations, no error, 2 min 52 s, 3.0 GB.
+* **Snapshot:** manifest schema 2 (4,778 theorems), packed (zstd -12: 536 MB), verified (`tools/release/pack.py verify`: hash, members, sizes, imports between layers) and imported from its unpacked copy.
+* **Axioms:** all 4,778 theorems resolve from the layers and rest on `propext`, `Classical.choice` and `Quot.sound` only.
+* **Duplicates (`compare_ids.py`):** of 4,750 replayed theorems 4,743 distinct statements: 7 statements are stated twice (14 theorems), so 7 theorems (0.15 %) would be redundant under one proof per statement id. A sample of 300 theorems a library says little about the duplicates inside a library: the sample is too thin to meet them.
+* **Not compared:** statement ids against Tengoku's (0 of 4,778: a manifest sample carries no source ids; the one-module runs above compare them).
