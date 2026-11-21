@@ -115,7 +115,9 @@ jobs:
             rm -rf "$RUNNER_TEMP/out1"
             ext_args=(--ext "$RUNNER_TEMP/ext.jsonl")
           fi
-          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" "${ext_args[@]}" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"
+          if ! /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample.ndjson" --module TengaiData.Sample --out "$RUNNER_TEMP/out" "${ext_args[@]}" 2> "$RUNNER_TEMP/replay-time.txt" | tee "$RUNNER_TEMP/replay-stats.json"; then
+            echo "--- tengai-replay stderr (the reason) ---"; grep -v "^\s" "$RUNNER_TEMP/replay-time.txt" | head -60; exit 1
+          fi
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt"
           ls -l "$RUNNER_TEMP/out/TengaiData/Sample.olean"
       - name: The cold import, against an empty module, and the axioms of the sample
