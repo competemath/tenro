@@ -94,6 +94,24 @@ class Compare(unittest.TestCase):
             self.assertEqual((r["names"], r["no_source_id"]), (2, 1))
             self.assertEqual(code, 0 if r["ok"] else 1)
 
+    def test_theorems_with_one_statement_id_are_counted_as_duplicates(self):
+        names = ["a", "b", "c", "d", "e", "f"]
+        replayed = {"a": "x", "b": "x", "c": "x", "d": "y", "e": "y", "f": "z"}
+        d = C.duplicates(names, replayed)
+        self.assertEqual(
+            (d["theorems"], d["statements"], d["duplicate_statements"], d["theorems_in_duplicate_statements"], d["redundant"]),
+            (6, 3, 2, 5, 3),
+        )
+        self.assertEqual([(g["id"], g["count"]) for g in d["largest"]], [("x", 3), ("y", 2)])  # the biggest group first, ties by id
+        self.assertEqual(d["largest"][0]["names"], ["a", "b", "c"])
+        # a name that did not replay is not counted; no duplicates is zero everywhere
+        self.assertEqual(C.duplicates(["a", "b"], {"a": "x"})["theorems"], 1)
+        self.assertEqual(C.duplicates(["a", "b"], {"a": "x", "b": "y"})["redundant"], 0)
+        # compare() carries it, and it does not change the verdict
+        r = C.compare(names, {n: i for n, i in replayed.items()}, replayed)
+        self.assertEqual(r["duplicates"]["redundant"], 3)
+        self.assertTrue(r["ok"])
+
     def test_all_equal_is_ok(self):
         r = C.compare(["a"], {"a": "x"}, {"a": "x"})
         self.assertTrue(r["ok"])
