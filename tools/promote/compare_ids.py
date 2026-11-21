@@ -41,6 +41,24 @@ def split_id(ident: str) -> tuple[str, str, str, str] | None:
     return (".".join(parts[:-3]), vars_, parts[-1], f"{hyps}h.{parts[-2]}")
 
 
+def duplicates(names: list[str], replayed: dict[str, str], largest: int = 5) -> dict:
+    """How many of the transplanted theorems state the same thing: names that share a statement id (the replayed one: the canonical elaborated statement) are one statement in Tengai, which keeps one proof per id
+    (design fix 3). `redundant` is how many theorems a promotion that kept one per id would not need; it is a measurement of the sample, not a change to it."""
+    by_id: dict[str, list[str]] = {}
+    for n in names:
+        if n in replayed:
+            by_id.setdefault(replayed[n], []).append(n)
+    groups = sorted(((i, sorted(ns)) for i, ns in by_id.items() if len(ns) > 1), key=lambda g: (-len(g[1]), g[0]))
+    return {
+        "theorems": sum(len(ns) for ns in by_id.values()),
+        "statements": len(by_id),
+        "duplicate_statements": len(groups),
+        "theorems_in_duplicate_statements": sum(len(ns) for _, ns in groups),
+        "redundant": sum(len(ns) - 1 for _, ns in groups),
+        "largest": [{"id": i, "count": len(ns), "names": ns[:3]} for i, ns in groups[:largest]],
+    }
+
+
 def compare(names: list[str], source: dict[str, str], replayed: dict[str, str], unchecked: frozenset[str] = frozenset()) -> dict:
     """unchecked: names whose sample row has no statement id by construction (a sample of the intake manifests: no isnad pass): they are counted (`no_source_id`), not compared, and not a failure.
     equal: the same id. drift: the same statement (kind, variables and canonical hash) whose hypothesis count or size class differs: isnad reads those off the telescope and the node count,
@@ -72,6 +90,7 @@ def compare(names: list[str], source: dict[str, str], replayed: dict[str, str], 
         "missing_in_source": missing_source,
         "missing_in_replayed": missing_replayed,
         "different": different,
+        "duplicates": duplicates(names, replayed),
         "ok": equal + len(drift) == len(checked),
     }
 
