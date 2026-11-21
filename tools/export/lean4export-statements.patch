@@ -1,23 +1,47 @@
 --- a/Export.lean
 +++ b/Export.lean
-@@ -40,6 +40,8 @@
+@@ -40,6 +40,10 @@
    noMDataExprs : HashMap Expr Expr := HashMap.emptyWithCapacity 100000
    exportMData : Bool := false
    exportUnsafe : Bool := false
 +  /-- `--statements`: a theorem is exported as an axiom of its type and its proof is not visited, so the constants only proofs use are not exported (a base for search, not for checking) -/
 +  statementsOnly : Bool := false
++  /-- `--statements`: the theorems that the VALUE of a definition or an opaque constant mentions are exported with their proofs all the same: the kernel may have to unfold one to check the definition (a `casesOn` on a proof of a conjunction that an auxiliary theorem supplies, `Acc.rec`) -/
++  keepProofs : NameSet := {}
    ignoreMissing : Bool := false
    /-- Maps the name of an inductive type to a list of names of corresponding recursors.
    This is used to facilitate exporting of related inductives, constructors, and recursors as a unit. -/
-@@ -71,6 +73,7 @@
+@@ -52,6 +56,20 @@
+     ReaderT.run (r := { env }) do
+       act
+ 
++/-- the theorems that the value of a definition or of an opaque constant mentions -/
++def proofsUsedByDefinitions (env : Environment) : NameSet := Id.run do
++  let mut s : NameSet := {}
++  for (_, info) in env.constants do
++    let value? : Option Expr := match info with
++      | .defnInfo v => some v.value
++      | .opaqueInfo v => some v.value
++      | _ => none
++    if let some e := value? then
++      for n in e.getUsedConstants do
++        if let some (.thmInfo _) := env.find? n then
++          s := s.insert n
++  return s
++
+ /--
+ Initialize the exporter state from an environment and cli options.
+ The `recursorMap` maps each inductive declaration's name to the list
+@@ -71,6 +89,8 @@
    modify fun st => { st with
      exportMData   := cliOptions.any (· == "--export-mdata")
      exportUnsafe  := cliOptions.any (· == "--export-unsafe")
 +    statementsOnly := cliOptions.any (· == "--statements")
++    keepProofs := if cliOptions.any (· == "--statements") then proofsUsedByDefinitions env else {}
      ignoreMissing := cliOptions.any (· == "--ignore-missing")
      recursorMap
    }
-@@ -277,17 +280,29 @@
+@@ -277,17 +297,30 @@
        ])
      ]
    | .thmInfo val => do
@@ -32,7 +56,8 @@
 -        ("all", ← dumpNames val.all)
 -      ])
 -    ]
-+    if (← get).statementsOnly then
++    let st ← get
++    if st.statementsOnly && !st.keepProofs.contains c then
 +      -- an axiom of the theorem's type: the proof is never visited
 +      dumpDeps val.type
 +      dumpObj [

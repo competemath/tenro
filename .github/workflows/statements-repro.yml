@@ -4,10 +4,18 @@ name: statements-repro
 on:
   workflow_dispatch:
     inputs:
-      roots:
-        description: "Names of the file's constants to export (their closure follows), separated by spaces"
+      source:
+        description: "fixture (tests/fixtures/statements/Repro.lean, on Lean core alone) or tengoku (a module of the Tengoku tree, with its compiled cache: about 12 more minutes)"
         required: true
-        default: "ratEqv ratEqv_left"
+        default: "fixture"
+      module:
+        description: "With source=tengoku: the module to import (e.g. Tengoku.Seed.Data.Rat.Encodable)"
+        required: false
+        default: "Tengoku.Seed.Data.Rat.Encodable"
+      roots:
+        description: "Names to export (their closure follows), separated by spaces"
+        required: true
+        default: "ratEqv ratEqv_left ratEqv2"
 permissions: {}
 concurrency:
   group: statements-repro
@@ -17,6 +25,8 @@ defaults:
     shell: bash
 env:
   ROOTS: ${{ inputs.roots }}
+  SOURCE: ${{ inputs.source }}
+  MODULE: ${{ inputs.module }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
 jobs:
   repro:
@@ -42,17 +52,28 @@ jobs:
           lake build 2>&1 | tail -2
       - name: tengai-replay from core/
         run: (cd core && lake build tengai-replay 2>&1 | tail -3)
-      - name: The file compiled against Lean core, and exported both ways
+      - name: Tengoku at the pin, with its compiled cache (source=tengoku only)
+        if: env.SOURCE == 'tengoku'
+        run: scripts/tengoku-setup.sh
+      - name: The roots exported both ways (the fixture compiled against Lean core, or a module of the Tengoku tree)
         run: |
-          mkdir -p "$RUNNER_TEMP/repro"
-          cd core
-          lake env lean -o "$RUNNER_TEMP/repro/Repro.olean" "$GITHUB_WORKSPACE/tests/fixtures/statements/Repro.lean"
-          core_path="$(lake env printenv LEAN_PATH)"
-          export LEAN_PATH="$RUNNER_TEMP/repro:$core_path"
+          [[ "$MODULE" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "bad module"; exit 1; }
           read -ra root_names <<< "$ROOTS"
           l4e="$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export"
-          lake env "$l4e" Repro -- "${root_names[@]}" > "$RUNNER_TEMP/repro-full.ndjson"
-          lake env "$l4e" Repro -- "${root_names[@]}" --statements > "$RUNNER_TEMP/repro-stmt.ndjson"
+          if [ "$SOURCE" = tengoku ]; then
+            cd .tengoku
+            lake env "$l4e" "$MODULE" -- "${root_names[@]}" > "$RUNNER_TEMP/repro-full.ndjson"
+            lake env "$l4e" "$MODULE" -- "${root_names[@]}" --statements > "$RUNNER_TEMP/repro-stmt.ndjson"
+          else
+            mkdir -p "$RUNNER_TEMP/repro"
+            cp tests/fixtures/statements/Repro.lean "$RUNNER_TEMP/repro/Repro.lean"
+            cd core
+            lake env lean --root="$RUNNER_TEMP/repro" -o "$RUNNER_TEMP/repro/Repro.olean" "$RUNNER_TEMP/repro/Repro.lean"
+            core_path="$(lake env printenv LEAN_PATH)"
+            export LEAN_PATH="$RUNNER_TEMP/repro:$core_path"
+            lake env "$l4e" Repro -- "${root_names[@]}" > "$RUNNER_TEMP/repro-full.ndjson"
+            lake env "$l4e" Repro -- "${root_names[@]}" --statements > "$RUNNER_TEMP/repro-stmt.ndjson"
+          fi
           wc -lc "$RUNNER_TEMP/repro-full.ndjson" "$RUNNER_TEMP/repro-stmt.ndjson"
       - name: The two exports compared
         run: |
