@@ -45,6 +45,8 @@ LEAN_PATH="snapshot:$(lake env printenv LEAN_PATH)" lake env lean problem.lean
 | `intent.jsonl`, `docs.jsonl` | inverted index and document lengths | words to statements: BM25 over the prose of the docstrings (inline code is dropped, so no identifier is indexed); `python3 tools/index/intent.py search <dir> "words" -k 10` |
 | `names.jsonl` | `{"id", "names": [...]}` | statement id to theorem names |
 
+Measured on the wide sample (4,778 theorems of 16 libraries, 17 layers; tenro run 44946576493): the shape and graph indexes cover **82,053 statements** (of 82,657 theorems that have a statement id), in **68,374 shapes** (7,091 of them shared by more than one statement: the prefilter has about 1.2 statements to confirm per shape), with **791,732 dependency edges** (372,151 dependencies are dropped because their statement has no id in the input). The intent index holds **13,413 statements with a docstring** (7,784 distinct tokens); 8,223 documented definitions are counted and not indexed, and 15,705 docstrings belong to declarations outside the snapshot. The files are 40.6 MB (`graph.jsonl` 27.0, `names.jsonl` 7.0, `shape.jsonl` 4.5, `intent.jsonl` 2.5, `docs.jsonl` 0.7), and the packed snapshot is 541,278,580 bytes, about 5.6 MB more than the same layers without them (run 44943029972). Building them took 6 minutes on the runner.
+
 What an index cannot do, stated: the intent index finds a statement by its docstring, so a theorem without a docstring, or one whose docstring is all code, is found by shape only; the docstring of a definition states nothing, so it is counted and not indexed; a query is words, not a formula (the shape index is the formula-side search); the shape is a prefilter with collisions (the stats file counts them), not an answer.
 
 ## What is active in a session, and what is not
@@ -60,4 +62,4 @@ Read from the wide layered run (4,778 theorems of 16 libraries, 17 layers, tenro
 ## Not verified
 
 - A prover loop on a snapshot: Leak II (Pantograph over `LEAN_PATH`) and Leak IV (`lake serve`) have not been run on one. The environment fits their model (a prebuilt directory on `LEAN_PATH`, nothing built at request time); it has not been tried.
-- Retrieval: Leak I (Loogle over the imported modules) has not been run on a snapshot, and the retrieval indexes of the design (intent, shape, dependency graph) are not built for promoted content yet.
+- Retrieval: Leak I (Loogle over the imported modules) has not been run on a snapshot, and no search over the built indexes by a real consumer has been done. The indexes are built, hashed and shipped (run 44946576493); how well they retrieve (recall on held-out goals) is not measured.
