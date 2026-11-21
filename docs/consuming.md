@@ -10,9 +10,13 @@ Status: the snapshot is a workflow artifact (`transplant-layers-<run id>`, 14 da
 manifest.json                    schema 2: pins, every layer (imports, units, constants, theorems, olean size and sha256), the checks of the whole
 TengaiData/Foundation.olean      what more than one topic reaches
 TengaiData/Topic/<Name>.olean    what one topic reaches; imports the foundation
+indexes/shape.jsonl              retrieval: statements by pattern shape (name-blind)
+indexes/graph.jsonl              retrieval: what each statement's proofs lean on (name-blind)
+indexes/intent.jsonl, docs.jsonl retrieval: the docstrings as an inverted index, BM25 (name-blind)
+indexes/names.jsonl              the one file with names: statement id -> theorem names
 ```
 
-The manifest says what was checked: the replay through Lean's kernel (every layer on its own), an independent kernel (nanoda) over all the layers read back out of the `.olean` files, the statement ids against Tengoku's, the axioms of every promoted theorem (the standard three only), and what a session loads (cold import, paired rounds, against the cap in `perf-budget.toml`).
+The manifest (`indexes` key) lists every index file with its size and sha256 and the counts the builders wrote. The manifest says what was checked: the replay through Lean's kernel (every layer on its own), an independent kernel (nanoda) over all the layers read back out of the `.olean` files, the statement ids against Tengoku's, the axioms of every promoted theorem (the standard three only), and what a session loads (cold import, paired rounds, against the cap in `perf-budget.toml`).
 
 ## Verify and unpack
 
@@ -29,6 +33,19 @@ LEAN_PATH="snapshot:$(lake env printenv LEAN_PATH)" lake env lean problem.lean
 ```
 
 `import TengaiData.Foundation` and `import TengaiData.Topic.<Name>` (a topic layer imports the foundation: importing a topic is enough). A session loads the foundation and the topics it imports, not the rest.
+
+## Retrieval indexes
+
+`pack.py verify` unpacks `indexes/` next to the layers and checks each file against the manifest (the files in the folder are exactly the files the manifest lists: a missing, a changed or an extra file is refused). They are plain JSON lines, sorted, deterministic, keyed by **statement id** (Tengoku's `isnad1` id: what a theorem states, not what it is called), so a prover or a scrambler that reads them cannot see a theorem's name. `names.jsonl` is the single exception, for a consumer that has to show a name to a person.
+
+| file | what | use |
+| --- | --- | --- |
+| `shape.jsonl` | `{"shape": 8 hex, "ids": [...]}` | the cheap prefilter: a goal of this pattern shape may be stated by one of these statements; the full id decides, never the shape |
+| `graph.jsonl` | `{"id", "deps": [ids]}` | what each statement's proofs lean on directly (static, over the theorems that state it) |
+| `intent.jsonl`, `docs.jsonl` | inverted index and document lengths | words to statements: BM25 over the prose of the docstrings (inline code is dropped, so no identifier is indexed); `python3 tools/index/intent.py search <dir> "words" -k 10` |
+| `names.jsonl` | `{"id", "names": [...]}` | statement id to theorem names |
+
+What an index cannot do, stated: the intent index finds a statement by its docstring, so a theorem without a docstring, or one whose docstring is all code, is found by shape only; the docstring of a definition states nothing, so it is counted and not indexed; a query is words, not a formula (the shape index is the formula-side search); the shape is a prefilter with collisions (the stats file counts them), not an answer.
 
 ## What is active in a session, and what is not
 
