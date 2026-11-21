@@ -1,7 +1,8 @@
 # The statements export (docs/statements.md): lean4export with tools/export/lean4export-statements.patch writes a theorem as an AXIOM of its type and does not visit its proof, so a whole tree exports in a fraction
 # of the lines (the statement-only closure of the wide sample is 6 % of the terms of the full one, workflow stmt-closure). The cheap gates run first and stop the run if they fail: the patched exporter builds, and
-# Init exported both ways (full, --statements) agrees on every declaration it shares (tools/export/compare_exports.py). Then the whole tree is exported as statements (lines, bytes, time, memory), and a replay of it
-# through the kernel (tengai-replay from core/) is tried as a probe: size of the module, what a session loads. Manual. It measures; it changes nothing.
+# Init exported both ways (full, --statements) agrees on every declaration it shares (tools/export/compare_exports.py). Then the wide sample of the transplant runs is exported as statements (the same roots as the
+# 1.6 GB snapshot, for an apples-to-apples size) and the whole tree is exported as statements (lines, bytes, time, memory), and a replay of each through the kernel (tengai-replay from core/) is tried as a probe:
+# size of the module, what a session loads. Manual. It measures; it changes nothing.
 name: export-statements
 on:
   workflow_dispatch:
@@ -10,8 +11,12 @@ on:
         description: "Modules to import and export whole, separated by spaces (a tree: Tengoku.All)"
         required: true
         default: "Tengoku.All"
+      wide_sample:
+        description: "Also export the wide sample of the transplant runs (16 libraries, 4,800 theorems, seed wide-2) as statements, for a size to set against the snapshot of the same roots: true or false"
+        required: true
+        default: "true"
       replay:
-        description: "After the export, try the kernel replay of it (tengai-replay from core/) and measure the module: true or false"
+        description: "After the exports, try the kernel replay of each (tengai-replay from core/) and measure the module: true or false"
         required: true
         default: "true"
 permissions: {}
@@ -24,6 +29,7 @@ defaults:
 env:
   MODULES: ${{ inputs.modules }}
   REPLAY: ${{ inputs.replay }}
+  WIDE_SAMPLE: ${{ inputs.wide_sample }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
   GH_TOKEN: ${{ github.token }}
 jobs:
@@ -67,90 +73,66 @@ jobs:
           python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/init-compare.json"))["passed"] else 1)'
       - name: Tengoku at the pin, with its compiled cache
         run: scripts/tengoku-setup.sh
+      - name: "The wide sample as statements (the 16 libraries, 4,800 theorems, seed wide-2 of the transplant runs): the same roots, theorems as axioms"
+        if: env.WIDE_SAMPLE == 'true'
+        run: |
+          libs="aintlib compfiles azurite nlalib complexitylib causalean linearhadwiger leancert regularity-lemmata lie-lean formal-mathfin imoshortlist erdos-lean cslib physlib brownian-motion"
+          python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$libs" --n 4800 --seed wide-2 --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
+          mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
+          mapfile -t names < "$RUNNER_TEMP/names.txt"
+          cd .tengoku
+          # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (22 of the 4,800)
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" --statements > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
+          grep -cE "^PANIC" "$RUNNER_TEMP/sample-stmt.err" || true
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The wide sample as statements (4,800 theorems of 16 libraries, seed wide-2)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/sample-stmt-stats.json"))["declarations"]["thm"] == 0 else 1)'
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
         working-directory: .tengoku
         run: |
           read -ra mods <<< "$MODULES"
           /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements > "$RUNNER_TEMP/tree-stmt.ndjson" 2> "$RUNNER_TEMP/tree-stmt.err" || { head -40 "$RUNNER_TEMP/tree-stmt.err"; exit 1; }
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/tree-stmt.err" || true
-          grep -vE "^\s|^Command|^Exit" "$RUNNER_TEMP/tree-stmt.err" | head -10 || true
-          wc -lc "$RUNNER_TEMP/tree-stmt.ndjson"
-      - name: "The size of it (lines by kind, bytes, compressed), and the stats record"
-        run: |
-          python3 - <<'PY'
-          import json, os, re, subprocess
-          t = os.environ["RUNNER_TEMP"]
-          f = f"{t}/tree-stmt.ndjson"
-
-          def count(pattern: str) -> int:
-              r = subprocess.run(["grep", "-c", "-E", pattern, f], capture_output=True, text=True)
-              return int(r.stdout.strip() or 0)
-
-          err = open(f"{t}/tree-stmt.err", encoding="utf-8", errors="replace").read()
-          wall = re.search(r"Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): ([0-9:.]+)", err)
-          rss = re.search(r"Maximum resident set size \(kbytes\): (\d+)", err)
-          lines = int(subprocess.run(["wc", "-l", f], capture_output=True, text=True).stdout.split()[0])
-          zst = int(subprocess.run(f"zstd -3 -T0 -c {f} | wc -c", shell=True, capture_output=True, text=True).stdout.split()[0])
-          stats = {
-              "modules": os.environ["MODULES"].split(),
-              "lean4export_commit": os.environ["LEAN4EXPORT_COMMIT"],
-              "lines": lines,
-              "bytes": os.path.getsize(f),
-              "zstd3_bytes": zst,
-              "names": count(r'^\{"in":'),
-              "levels": count(r'^\{"il":'),
-              "terms": count(r'"ie":'),
-              "declarations": {k: count(rf'^\{{"{k}":') for k in ("axiom", "def", "inductive", "opaque", "quot", "thm")},
-              "export_wall": wall.group(1) if wall else None,
-              "export_max_rss_kb": int(rss.group(1)) if rss else None,
-          }
-          json.dump(stats, open(f"{t}/tree-stmt-stats.json", "w"), indent=1, sort_keys=True)
-          d = stats["declarations"]
-          md = [
-              "### The whole tree as statements",
-              "",
-              f"{stats['lines']:,} lines, {stats['bytes'] / 1e6:,.0f} MB ({stats['zstd3_bytes'] / 1e6:,.0f} MB with zstd -3); export {stats['export_wall']}, peak {(stats['export_max_rss_kb'] or 0) / 1e6:.1f} GB.",
-              "",
-              "| names | levels | terms | axioms | definitions | inductive groups | opaque | quot | theorems |",
-              "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
-              f"| {stats['names']:,} | {stats['levels']:,} | {stats['terms']:,} | {d['axiom']:,} | {d['def']:,} | {d['inductive']:,} | {d['opaque']:,} | {d['quot']:,} | {d['thm']:,} |",
-          ]
-          open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8").write("\n".join(md) + "\n")
-          print("\n".join(md))
-          assert d["thm"] == 0, "a theorem is left in the statements export"
-          PY
-      - name: "Probe: the kernel replay of the statements export (tengai-replay from core/), the size of the module, what a session loads"
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/export/export_stats.py "$RUNNER_TEMP/tree-stmt.ndjson" --time-log "$RUNNER_TEMP/tree-stmt.err" --label "The whole tree as statements ($MODULES)" --out "$RUNNER_TEMP/tree-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/tree-stmt-stats.json"))["declarations"]["thm"] == 0 else 1)'
+      - name: "Probe: the kernel replay of each statements export (tengai-replay from core/), the size of the module, what a session loads"
         if: env.REPLAY == 'true'
         continue-on-error: true
-        timeout-minutes: 150
+        timeout-minutes: 200
         run: |
           (cd core && lake build tengai-replay 2>&1 | tail -3)
           replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
-          mkdir -p "$RUNNER_TEMP/out"
-          rc=0
-          /usr/bin/time -v "$replay" "$RUNNER_TEMP/tree-stmt.ndjson" --module TengaiData.Statements --out "$RUNNER_TEMP/out" > "$RUNNER_TEMP/replay-stats.json" 2> "$RUNNER_TEMP/replay-time.txt" || rc=$?
-          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt" || true
-          if [ "$rc" != 0 ]; then echo "replay exit $rc; the reason:"; grep -v "^\s" "$RUNNER_TEMP/replay-time.txt" | head -40; exit 1; fi
-          cat "$RUNNER_TEMP/replay-stats.json" | head -c 1500; echo
-          ls -l "$RUNNER_TEMP/out/TengaiData/Statements.olean"
-          { echo "### The replay of the statements export"; echo; echo '```'; grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-time.txt"; ls -l "$RUNNER_TEMP/out/TengaiData/Statements.olean"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          cd core
-          core_path="$(lake env printenv LEAN_PATH)"
-          export LEAN_PATH="$RUNNER_TEMP/out:$core_path"
+          core_path="$(cd core && lake env printenv LEAN_PATH)"
           printf 'import Init\n' > "$RUNNER_TEMP/empty.lean"
-          printf 'import TengaiData.Statements\n' > "$RUNNER_TEMP/import-only.lean"
-          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty.json"
-          python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/import-only.lean" | tee "$RUNNER_TEMP/import-stmt.json"
+          for label in sample tree; do
+            export_file="$RUNNER_TEMP/$label-stmt.ndjson"
+            [ -s "$export_file" ] || continue
+            module="TengaiData.Statements${label^}"
+            out="$RUNNER_TEMP/out-$label"
+            mkdir -p "$out"
+            rc=0
+            /usr/bin/time -v "$replay" "$export_file" --module "$module" --out "$out" > "$RUNNER_TEMP/replay-$label-stats.json" 2> "$RUNNER_TEMP/replay-$label-time.txt" || rc=$?
+            echo "== $label: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/replay-$label-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+            if [ "$rc" != 0 ]; then echo "$label: replay exit $rc; the reason:"; grep -v "^\s" "$RUNNER_TEMP/replay-$label-time.txt" | head -40; continue; fi
+            head -c 1200 "$RUNNER_TEMP/replay-$label-stats.json"; echo
+            olean="$out/${module//./\/}.olean"
+            ls -l "$olean"
+            printf 'import %s\n' "$module" > "$RUNNER_TEMP/import-$label.lean"
+            (cd core && LEAN_PATH="$out:$core_path" python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/empty.lean" | tee "$RUNNER_TEMP/import-empty-$label.json")
+            (cd core && LEAN_PATH="$out:$core_path" python3 ../tools/promote/import_time.py --runs 7 -- lake env lean "$RUNNER_TEMP/import-$label.lean" | tee "$RUNNER_TEMP/import-$label.json")
+            { echo "### The replay of the $label statements export"; echo; echo '```'; grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/replay-$label-time.txt"; ls -l "$olean"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: export-statements-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/init-compare.json
+            ${{ runner.temp }}/sample-stmt-stats.json
             ${{ runner.temp }}/tree-stmt-stats.json
-            ${{ runner.temp }}/replay-stats.json
-            ${{ runner.temp }}/replay-time.txt
-            ${{ runner.temp }}/import-empty.json
-            ${{ runner.temp }}/import-stmt.json
+            ${{ runner.temp }}/replay-*-stats.json
+            ${{ runner.temp }}/replay-*-time.txt
+            ${{ runner.temp }}/import-*.json
           retention-days: 30
           if-no-files-found: warn

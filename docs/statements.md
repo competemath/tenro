@@ -12,7 +12,8 @@ What it is not: a verified environment. `#print axioms` of a promoted theorem pr
 
 * `tools/export/lean4export-statements.patch`: `lean4export --statements`, a theorem is written as an `axiom` line (same name, level parameters and type; `isUnsafe` false) and its proof is not visited. Nothing else changes.
 * `tools/export/compare_exports.py`: two exports of one environment (full, `--statements`) agree on every declaration they share, without trusting the numbering of terms (each declaration is reduced to a digest with every name, level and term resolved): a theorem is an axiom with the same name, level parameters and type; the statements export has no theorem and nothing the full one lacks. 12 tests on synthetic exports; the workflow `export-statements` runs it on `Init` exported both ways before anything else.
-* `.github/workflows/export-statements.yml`: the gates, then the whole tree exported as statements (lines, bytes, time, memory) and, as a probe, replayed through the kernel by `tengai-replay` (size of the module, what a session loads).
+* `.github/workflows/export-statements.yml`: the gates, then the wide sample of the transplant runs exported as statements (the same 4,800 roots as the 1.6 GB snapshot: a size to set against it), then the whole tree exported as statements (lines, bytes, time, memory) and, as a probe, each replayed through the kernel by `tengai-replay` (size of the module, what a session loads).
+* `tools/export/export_stats.py`: the lines of an export by kind, bytes, zstd size, and the wall time and peak memory of the export from `/usr/bin/time -v`.
 * `tools/promote/stmt_closure.py` and the workflow `stmt-closure`: the same question answered from the export of a sample alone.
 
 ## Measured
