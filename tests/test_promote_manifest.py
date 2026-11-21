@@ -282,6 +282,54 @@ class ManifestLayers(unittest.TestCase):
             self.assertEqual(M.main([*args[:-4], "--out", str(d / "b.json"), "--pin", "tengoku=abc"]), 0)
             self.assertEqual((d / "a.json").read_text(), (d / "b.json").read_text())
 
+    def indexes(self, d: Path) -> Path:
+        idx = d / "idx"
+        idx.mkdir()
+        (idx / "shape.jsonl").write_text('{"shape": "ab", "ids": ["i1"]}\n')
+        (idx / "graph.jsonl").write_text('{"id": "i1", "deps": []}\n')
+        (idx / "stats.json").write_text(json.dumps({"statements": 1, "sha256": {"shape.jsonl": "x"}}))
+        (idx / "intent-stats.json").write_text(json.dumps({"documents": 3, "tokens": 40, "sha256": {"intent.jsonl": "y"}}))
+        return idx
+
+    def test_the_indexes_are_recorded_with_their_hashes_and_the_counts_the_builders_wrote(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"}, self.indexes(d))
+            idx = m["indexes"]
+            self.assertEqual(sorted(idx["files"]), ["graph.jsonl", "intent-stats.json", "shape.jsonl", "stats.json"])
+            self.assertEqual(idx["files"]["shape.jsonl"]["bytes"], len('{"shape": "ab", "ids": ["i1"]}\n'))
+            self.assertEqual(len(idx["files"]["shape.jsonl"]["sha256"]), 64)
+            self.assertEqual(
+                (idx["build"], idx["intent"]), ({"statements": 1}, {"documents": 3, "tokens": 40})
+            )  # the hashes of the builders are in `files`, not twice
+            self.assertNotIn("indexes", M.build_layers(d, d / "layered", {"tengoku": "abc"}))  # without a directory: no record
+            empty = d / "empty"
+            empty.mkdir()
+            with self.assertRaises(SystemExit):
+                M.build_layers(d, d / "layered", {}, empty)  # a directory without a file is not an index
+
+    def test_main_takes_the_indexes_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            idx = self.indexes(d)
+            args = [
+                "layers",
+                "--dir",
+                str(d),
+                "--layered",
+                str(d / "layered"),
+                "--out",
+                str(d / "a.json"),
+                "--pin",
+                "tengoku=abc",
+                "--indexes",
+                str(idx),
+            ]
+            self.assertEqual(M.main(args), 0)
+            self.assertIn("indexes", json.loads((d / "a.json").read_text()))
+
     def test_a_layer_without_its_olean_is_an_error_and_a_check_that_did_not_run_is_null(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)

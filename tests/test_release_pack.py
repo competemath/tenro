@@ -157,5 +157,80 @@ class PackLayers(unittest.TestCase):
         self.assertIn("TengaiData.Elsewhere", str(c.exception))
 
 
+INDEXES = {
+    "shape.jsonl": b'{"shape": "ab", "ids": ["i1"]}\n',
+    "graph.jsonl": b'{"id": "i1", "deps": []}\n',
+    "names.jsonl": b'{"id": "i1", "names": ["A.t"]}\n',
+}
+
+
+def make_indexed(d: Path, tamper=None):
+    """a promotion in layers whose manifest lists its indexes; `tamper` changes the manifest or the directory after the manifest was written"""
+    make_layers(d)
+    idx = d / "idx"
+    idx.mkdir()
+    for name, data in INDEXES.items():
+        (idx / name).write_bytes(data)
+    m = json.loads((d / "manifest.json").read_text())
+    m["indexes"] = {"files": {n: {"bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()} for n, b in INDEXES.items()}}
+    if tamper == "unlisted":
+        (idx / "intent.jsonl").write_bytes(b"{}\n")
+    if tamper == "missing":
+        m["indexes"]["files"]["intent.jsonl"] = {"bytes": 3, "sha256": "0" * 64}
+    if tamper == "hash":
+        m["indexes"]["files"]["shape.jsonl"]["sha256"] = "f" * 64
+    (d / "manifest.json").write_text(json.dumps(m))
+    return idx
+
+
+class PackIndexes(unittest.TestCase):
+    def roundtrip(self, tamper=None):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            idx = make_indexed(d, tamper)
+            packed = K.pack(d / "o", d / "manifest.json", d / "s.tar", idx)
+            return packed, K.verify(d / "s.tar", d / "into")
+
+    def test_the_indexes_travel_with_the_layers_and_verify(self):
+        packed, r = self.roundtrip()
+        self.assertEqual(packed["members"][-3:], ["indexes/graph.jsonl", "indexes/names.jsonl", "indexes/shape.jsonl"])
+        self.assertEqual(r["modules"], ["TengaiData/Foundation.olean", "TengaiData/Topic/Aintlib.olean"])
+
+    def test_the_same_inputs_give_the_same_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            idx = make_indexed(d)
+            a = K.pack(d / "o", d / "manifest.json", d / "a.tar", idx)
+            b = K.pack(d / "o", d / "manifest.json", d / "b.tar", idx)
+            self.assertEqual(a["sha256"], b["sha256"])
+
+    def test_an_index_that_differs_from_the_manifest_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("hash")
+        self.assertIn("the index shape.jsonl differs from the manifest", str(c.exception))
+
+    def test_an_index_the_manifest_does_not_list_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("unlisted")
+        self.assertIn("not in the manifest ['intent.jsonl']", str(c.exception))
+
+    def test_an_index_the_snapshot_does_not_hold_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("missing")
+        self.assertIn("missing ['intent.jsonl']", str(c.exception))
+
+    def test_a_snapshot_with_indexes_but_a_manifest_without_them_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            idx = make_indexed(d)
+            m = json.loads((d / "manifest.json").read_text())
+            del m["indexes"]
+            (d / "manifest.json").write_text(json.dumps(m))
+            K.pack(d / "o", d / "manifest.json", d / "s.tar", idx)
+            with self.assertRaises(SystemExit) as c:
+                K.verify(d / "s.tar", d / "into")
+            self.assertIn("not in the manifest", str(c.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
