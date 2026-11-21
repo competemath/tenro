@@ -103,6 +103,24 @@ jobs:
           mapfile -t names < "$RUNNER_TEMP/names.txt"
           lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" -- "${names[@]}" > "$RUNNER_TEMP/sample.ndjson"
           wc -lc "$RUNNER_TEMP/sample.ndjson"
+      - name: "Layers: the plan (which layer each constant of the sample belongs to)"
+        if: env.LAYERS == 'true'
+        continue-on-error: true   # the planner reads a 2 GB export in Python: if it fails, the one-module pipeline below still runs and the layer steps say why they cannot
+        run: |
+          [ "$EXTENSIONS" = true ] && [ -s "$RUNNER_TEMP/sample.jsonl" ] || { echo "::error::layers needs extensions=true and a candidates run (the libraries of the sample are its topics)"; exit 1; }
+          python3 - <<'PY'
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          topics: dict[str, list[str]] = {}
+          for ln in open(f"{t}/sample.jsonl"):
+              if ln.strip():
+                  r = json.loads(ln)
+                  topics.setdefault(r["library"], []).append(r["name"])
+          json.dump(topics, open(f"{t}/topics.json", "w"))
+          print("topics:", {k: len(v) for k, v in topics.items()})
+          PY
+          python3 tools/promote/layers.py "$RUNNER_TEMP/sample.ndjson" --topics "$RUNNER_TEMP/topics.json" --out "$RUNNER_TEMP/layers" | tee -a "$GITHUB_STEP_SUMMARY"
+          ls -l "$RUNNER_TEMP/layers/layers.json"
       - name: tengai-replay from core/ (kernel replay into Lean core alone, then the extension entries put back)
         run: |
           (cd core && lake build tengai-replay tengai-extinfo tengai-typeinfo 2>&1 | tail -3)
@@ -292,25 +310,10 @@ jobs:
           PY
 
       # ----- by layers (ADR-0005, "Layers"): the same sample promoted as a foundation and a layer per library, and what a session loads of it. Added after the one-module pipeline above, which it does not touch.
-      - name: "Layers: the plan (which layer each constant of the sample belongs to)"
-        if: env.LAYERS == 'true'
-        run: |
-          [ "$EXTENSIONS" = true ] && [ -s "$RUNNER_TEMP/sample.jsonl" ] && [ -s "$RUNNER_TEMP/added.jsonl" ] || { echo "::error::layers needs extensions=true and a candidates run (the libraries of the sample are its topics)"; exit 1; }
-          python3 - <<'PY'
-          import json, os
-          t = os.environ["RUNNER_TEMP"]
-          topics: dict[str, list[str]] = {}
-          for ln in open(f"{t}/sample.jsonl"):
-              if ln.strip():
-                  r = json.loads(ln)
-                  topics.setdefault(r["library"], []).append(r["name"])
-          json.dump(topics, open(f"{t}/topics.json", "w"))
-          print("topics:", {k: len(v) for k, v in topics.items()})
-          PY
-          python3 tools/promote/layers.py "$RUNNER_TEMP/sample.ndjson" --topics "$RUNNER_TEMP/topics.json" --added "$RUNNER_TEMP/added.jsonl" --out "$RUNNER_TEMP/layers" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Layers: tengai-replay by layers (the foundation first, then each topic, each kernel-checked on its own)"
         if: env.LAYERS == 'true'
         run: |
+          [ -s "$RUNNER_TEMP/layers/layers.json" ] || { echo "::error::the plan of the layers failed (its step above says why)"; exit 1; }
           mkdir -p "$RUNNER_TEMP/layered"
           export LEAN_PATH="$RUNNER_TEMP/layered"
           replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
