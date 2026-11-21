@@ -8,6 +8,9 @@ are not written at all. Nothing else may change. This checks that, on two export
 
   * every declaration is reduced to a digest of what the export says about it, with every reference to a name, a universe level or a term replaced by what it stands for (the numbering of terms depends on
     which proofs were visited before them, so two exports of one declaration number it differently);
+  * terms are compared UP TO BINDER NAMES AND BINDER INFO, as Lean itself does (`Expr.eqv`, which lean4export's table of terms uses): the exporter writes a term once, with the binder names and annotations of the
+    first alpha-equivalent term it met, so which names a declaration carries depends on what was visited before it, and leaving the proofs out changes that (a declaration that differs only so is counted as
+    `binder_names_only`, not as a change: a replay restores the names and annotations of the source from Tengoku's own environment, `tengai-extinfo` `bi` rows);
   * a declaration in both exports must have the same digest, except a THEOREM of the full export that is an axiom in the statements export: it must have the same name, level parameters and type;
   * the statements export holds no theorem, and nothing the full export lacks.
 
@@ -47,8 +50,11 @@ class Reader:
     def __init__(self) -> None:
         self.names: list[str] = [""]
         self.levels = array("Q", [digest("zero")])
-        self.terms = array("Q")
-        self.decls: dict[str, tuple[str, int, int]] = {}
+        self.terms = array("Q")  # digests of terms as written, binder names and binder info included
+        self.alpha = array("Q")  # digests of terms up to binder names and binder info (Lean's `Expr.eqv`)
+        self.decls: dict[
+            str, tuple[str, int, int, int, int]
+        ] = {}  # kind, then (up to alpha, as written) digests of everything and of name, level parameters and type
 
     def read(self, path: Path) -> None:
         with open(path, "rb") as f:
@@ -92,52 +98,57 @@ class Reader:
         i = o["ie"]
         if i != len(self.terms):
             raise SystemExit(f"compare_exports: term {i} out of order at line {n}")
-        t = self.terms
+        t, a = self.terms, self.alpha
         if "app" in o:
             v = o["app"]
-            d = digest("app", t[v["fn"]], t[v["arg"]])
+            d, e = digest("app", t[v["fn"]], t[v["arg"]]), digest("app", a[v["fn"]], a[v["arg"]])
         elif "const" in o:
             v = o["const"]
-            d = digest("const", self.names[v["name"]], tuple(self.levels[u] for u in v["us"]))
+            d = e = digest("const", self.names[v["name"]], tuple(self.levels[u] for u in v["us"]))
         elif "bvar" in o:
-            d = digest("bvar", o["bvar"])
+            d = e = digest("bvar", o["bvar"])
         elif "sort" in o:
-            d = digest("sort", self.levels[o["sort"]])
+            d = e = digest("sort", self.levels[o["sort"]])
         elif "lam" in o or "forallE" in o:
             kind = "lam" if "lam" in o else "forallE"
             v = o[kind]
             d = digest(kind, self.names[v["name"]], v["binderInfo"], t[v["type"]], t[v["body"]])
+            e = digest(kind, a[v["type"]], a[v["body"]])
         elif "letE" in o:
             v = o["letE"]
             d = digest("letE", self.names[v["name"]], t[v["type"]], t[v["value"]], t[v["body"]], v["nondep"])
+            e = digest("letE", a[v["type"]], a[v["value"]], a[v["body"]])
         elif "proj" in o:
             v = o["proj"]
             d = digest("proj", self.names[v["typeName"]], v["idx"], t[v["struct"]])
+            e = digest("proj", self.names[v["typeName"]], v["idx"], a[v["struct"]])
         elif "natVal" in o:
-            d = digest("natVal", o["natVal"])
+            d = e = digest("natVal", o["natVal"])
         elif "strVal" in o:
-            d = digest("strVal", o["strVal"])
+            d = e = digest("strVal", o["strVal"])
         elif "mdata" in o:
             v = o["mdata"]
-            d = digest("mdata", t[v["expr"]], json.dumps(v.get("data"), sort_keys=True))
+            data = json.dumps(v.get("data"), sort_keys=True)
+            d, e = digest("mdata", t[v["expr"]], data), digest("mdata", a[v["expr"]], data)
         else:
             raise SystemExit(f"compare_exports: unknown term at line {n}: {str(o)[:120]}")
         self.terms.append(d)
+        self.alpha.append(e)
 
-    def resolve(self, v: object, key: str = "") -> object:
-        """a field of a declaration with every reference replaced by what it stands for"""
+    def resolve(self, v: object, key: str, table: array) -> object:
+        """a field of a declaration with every reference replaced by what it stands for (terms by their digest in `table`)"""
         if isinstance(v, dict):
-            return {k: self.resolve(x, k) for k, x in sorted(v.items())}
+            return {k: self.resolve(x, k, table) for k, x in sorted(v.items())}
         if isinstance(v, list):
             if key in NAME_LIST_KEYS and all(isinstance(x, int) for x in v):
                 return [self.names[x] for x in v]
-            return [self.resolve(x, key) for x in v]
+            return [self.resolve(x, key, table) for x in v]
         if isinstance(v, bool) or not isinstance(v, int):
             return v
         if key in NAME_KEYS:
             return self.names[v]
         if key in TERM_KEYS:
-            return self.terms[v]
+            return table[v]
         return v
 
     def declaration(self, o: dict, n: int) -> None:
@@ -152,9 +163,16 @@ class Reader:
             name = self.names[m["name"]]
             if name in self.decls:
                 raise SystemExit(f"compare_exports: {name} declared twice (line {n})")
-            whole = digest(k, json.dumps(self.resolve(m), sort_keys=True))
-            head = digest(name, tuple(self.names[x] for x in m["levelParams"]), self.terms[m["type"]])
-            self.decls[name] = (k, whole, head)
+            params = tuple(self.names[x] for x in m["levelParams"])
+            whole_a = digest(k, json.dumps(self.resolve(m, "", self.alpha), sort_keys=True))
+            whole_s = digest(k, json.dumps(self.resolve(m, "", self.terms), sort_keys=True))
+            self.decls[name] = (
+                k,
+                whole_a,
+                digest(name, params, self.alpha[m["type"]]),
+                whole_s,
+                digest(name, params, self.terms[m["type"]]),
+            )
 
 
 def read(path: Path) -> Reader:
@@ -167,26 +185,31 @@ def compare(full: Reader, stmt: Reader) -> dict:
     """what the two readers' declarations say about each other"""
     problems: dict[str, list[str]] = {"changed": [], "only_in_statements": [], "theorems_left": []}
     stubbed = same = 0
-    for name, (kind, whole, head) in stmt.decls.items():
+    binder_only: list[str] = []
+    for name, (kind, whole_a, head_a, whole_s, head_s) in stmt.decls.items():
         if kind == "thm":
             problems["theorems_left"].append(name)
         other = full.decls.get(name)
         if other is None:
             problems["only_in_statements"].append(name)
         elif other[0] == "thm" and kind == "axiom":
-            if other[2] == head:
-                stubbed += 1
-            else:
+            if other[2] != head_a:
                 problems["changed"].append(name)
-        elif other[0] == kind and other[1] == whole:
+                continue
+            stubbed += 1
+            if other[4] != head_s:
+                binder_only.append(name)
+        elif other[0] == kind and other[1] == whole_a:
             same += 1
+            if other[3] != whole_s:
+                binder_only.append(name)
         else:
             problems["changed"].append(name)
     dropped = {n for n in full.decls if n not in stmt.decls}
 
     def kinds(r: Reader) -> dict[str, int]:
         out: dict[str, int] = {}
-        for k, _, _ in r.decls.values():
+        for k, *_ in r.decls.values():
             out[k] = out.get(k, 0) + 1
         return dict(sorted(out.items()))
 
@@ -195,6 +218,8 @@ def compare(full: Reader, stmt: Reader) -> dict:
         "statements": {"declarations": len(stmt.decls), "terms": len(stmt.terms), "kinds": kinds(stmt)},
         "theorems_as_axioms": stubbed,
         "unchanged": same,
+        "binder_names_only": len(binder_only),
+        "binder_names_only_examples": binder_only[:10],
         "dropped_with_the_proofs": len(dropped),
         "problems": {k: v[:20] for k, v in problems.items()},
         "problem_counts": {k: len(v) for k, v in problems.items()},
@@ -216,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"full: {f['declarations']:,} declarations, {f['terms']:,} terms; statements: {s['declarations']:,} declarations, {s['terms']:,} terms "
         f"({100 * s['terms'] / max(f['terms'], 1):.1f} % of the terms); {report['theorems_as_axioms']:,} theorems stand as axioms, "
-        f"{report['unchanged']:,} declarations are the same, {report['dropped_with_the_proofs']:,} dropped out with the proofs"
+        f"{report['unchanged']:,} declarations are the same, {report['dropped_with_the_proofs']:,} dropped out with the proofs; "
+        f"{report['binder_names_only']:,} of the shared ones differ only in binder names or binder info (the exporter's term sharing)"
     )
     for k, n in report["problem_counts"].items():
         if n:

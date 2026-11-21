@@ -109,6 +109,49 @@ class Agreement(unittest.TestCase):
         self.assertIn("base", r["problems"]["changed"])
 
 
+def with_binder(kind: str, binder: str, info: str, body: str = "T") -> Builder:
+    """T and base are axioms; `P` has the type `(binder : T) -> body`, as a definition or as a theorem (`kind`); the export keeps the first alpha-equivalent term's binder names and info"""
+    b = Builder()
+    b.decl("axiom", "T", b.sort())
+    t = b.const("T")
+    b.decl("axiom", "base", t)
+    inner = b.const(body)
+    pi = b.term(forallE={"name": b.name(binder), "type": t, "body": inner, "binderInfo": info})
+    if kind == "axiom":
+        b.decl("axiom", "P", pi)
+    else:
+        b.decl(kind, "P", pi, b.const("base"))
+    return b
+
+
+class BinderNames(unittest.TestCase):
+    def test_binder_names_and_binder_info_alone_are_not_a_change(self):
+        r = compared(with_binder("def", "x", "default"), with_binder("def", "y", "implicit"))
+        self.assertTrue(r["passed"], r["problems"])
+        self.assertEqual(r["unchanged"], 3)  # T, base, P
+        self.assertEqual(r["binder_names_only"], 1)
+        self.assertEqual(r["binder_names_only_examples"], ["P"])
+
+    def test_the_same_binder_is_not_counted(self):
+        r = compared(with_binder("def", "x", "default"), with_binder("def", "x", "default"))
+        self.assertEqual(r["binder_names_only"], 0)
+
+    def test_another_body_under_the_binder_is_a_change(self):
+        r = compared(with_binder("def", "x", "default"), with_binder("def", "x", "default", body="base"))
+        self.assertFalse(r["passed"])
+        self.assertEqual(r["problems"]["changed"], ["P"])
+
+    def test_a_theorem_with_other_binder_names_stands_as_an_axiom_and_is_counted(self):
+        r = compared(with_binder("thm", "x", "default"), with_binder("axiom", "y", "instImplicit"))
+        self.assertTrue(r["passed"], r["problems"])
+        self.assertEqual(r["theorems_as_axioms"], 1)
+        self.assertEqual(r["binder_names_only"], 1)
+
+    def test_a_theorem_whose_type_changed_under_its_binder_is_refused(self):
+        r = compared(with_binder("thm", "x", "default"), with_binder("axiom", "x", "default", body="base"))
+        self.assertEqual(r["problems"]["changed"], ["P"])
+
+
 def with_levels(param: str, rec_type_extra: bool = False) -> Builder:
     """a universe-polymorphic axiom `P.{param} : Sort param`, a structure-like inductive with its constructor and recursor"""
     b = Builder()
