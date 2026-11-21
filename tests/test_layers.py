@@ -55,10 +55,20 @@ class Planning(unittest.TestCase):
         p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
         self.assertEqual(
             p["topics"]["alpha"],
-            {"module": "TengaiData.Topic.Alpha", "theorems": 1, "own_units": 2, "foundation_units_used": 3, "units_loaded": 5},
+            {
+                "module": "TengaiData.Topic.Alpha",
+                "theorems": 1,
+                "own_units": 2,
+                "foundation_units_used": 3,
+                "units_loaded": 5,
+                "terms_loaded": 10,  # A1 4 (type, application, its two constants), only_a 2, and the foundation's T 1, base 1, shared 2
+            },
         )
         self.assertEqual(p["topics"]["beta"]["units_loaded"], 4)  # B1 and what it reaches: shared, base, T
-        self.assertEqual(p["totals"], {"units": 6, "foundation_units": 3, "constants": 6})
+        self.assertEqual(p["topics"]["beta"]["terms_loaded"], 6)
+        self.assertEqual(
+            p["totals"], {"units": 6, "foundation_units": 3, "constants": 6, "terms": 12, "kinds": {"axiom": 2, "thm": 4}}
+        )  # the kinds are those of each unit's first constant
 
     def test_one_topic_has_no_foundation(self):
         p = run(two_topics(), {"only": ["A1", "B1"]})
