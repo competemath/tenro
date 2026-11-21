@@ -127,7 +127,21 @@ def layer_path(layered: Path, module: str) -> Path:
     return layered / (module.replace(".", "/") + ".olean")
 
 
-def build_layers(d: Path, layered: Path, pins: dict[str, str]) -> dict:
+def index_record(indexes: Path) -> dict:
+    """the retrieval indexes of a promotion (`tools/index/build.py` and `intent.py`: the pattern shape, the static dependency graph, the names, the intent): every file with its size and sha256, and the counts the two
+    builders wrote, so that the manifest says what is in them without opening them. Name-blind by construction except `names.jsonl`."""
+    files = sorted(p for p in indexes.iterdir() if p.is_file())
+    if not files:
+        raise SystemExit(f"manifest: {indexes} holds no index file")
+    rec: dict = {"files": {p.name: sha256_and_sizes(p) for p in files}}
+    for key, stats in (("build", "stats.json"), ("intent", "intent-stats.json")):
+        data = read_json(indexes / stats)
+        if data is not None:
+            rec[key] = {k: v for k, v in data.items() if k != "sha256"}  # the hashes are in `files`
+    return rec
+
+
+def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None) -> dict:
     """the record of a promotion in layers (schema 2): every layer with what it imports, what it holds, what its replay added and the hash and size of its olean; the checks of the whole (independent kernel over all
     the layers, statement ids, axioms, what a session loads). A layer whose file is missing is an error, a check that did not run is null."""
     plan = json.loads((d / "layers" / "layers.json").read_text(encoding="utf-8"))
@@ -170,6 +184,7 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str]) -> dict:
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
     return {
         "schema": 2,
+        **({"indexes": index_record(indexes)} if indexes is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
         "theorems": sorted(sample, key=lambda r: r["name"]),
@@ -212,8 +227,12 @@ def main_layers(argv: list[str]) -> int:
     ap.add_argument("--layered", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--pin", action="append", default=[], help="KEY=VALUE")
+    ap.add_argument(
+        "--indexes",
+        help="the directory of the retrieval indexes (build.py and intent.py wrote it): recorded with its hashes, packed with the snapshot",
+    )
     a = ap.parse_args(argv)
-    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin))
+    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(json.dumps(m, indent=1, sort_keys=True) + "\n")
     print(

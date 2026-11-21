@@ -10,9 +10,13 @@ Status: the snapshot is a workflow artifact (`transplant-layers-<run id>`, 14 da
 manifest.json                    schema 2: pins, every layer (imports, units, constants, theorems, olean size and sha256), the checks of the whole
 TengaiData/Foundation.olean      what more than one topic reaches
 TengaiData/Topic/<Name>.olean    what one topic reaches; imports the foundation
+indexes/shape.jsonl              retrieval: statements by pattern shape (name-blind)
+indexes/graph.jsonl              retrieval: what each statement's proofs lean on (name-blind)
+indexes/intent.jsonl, docs.jsonl retrieval: the docstrings as an inverted index, BM25 (name-blind)
+indexes/names.jsonl              the one file with names: statement id -> theorem names
 ```
 
-The manifest says what was checked: the replay through Lean's kernel (every layer on its own), an independent kernel (nanoda) over all the layers read back out of the `.olean` files, the statement ids against Tengoku's, the axioms of every promoted theorem (the standard three only), and what a session loads (cold import, paired rounds, against the cap in `perf-budget.toml`).
+The manifest (`indexes` key) lists every index file with its size and sha256 and the counts the builders wrote. The manifest says what was checked: the replay through Lean's kernel (every layer on its own), an independent kernel (nanoda) over all the layers read back out of the `.olean` files, the statement ids against Tengoku's, the axioms of every promoted theorem (the standard three only), and what a session loads (cold import, paired rounds, against the cap in `perf-budget.toml`).
 
 ## Verify and unpack
 
@@ -30,6 +34,21 @@ LEAN_PATH="snapshot:$(lake env printenv LEAN_PATH)" lake env lean problem.lean
 
 `import TengaiData.Foundation` and `import TengaiData.Topic.<Name>` (a topic layer imports the foundation: importing a topic is enough). A session loads the foundation and the topics it imports, not the rest.
 
+## Retrieval indexes
+
+`pack.py verify` unpacks `indexes/` next to the layers and checks each file against the manifest (the files in the folder are exactly the files the manifest lists: a missing, a changed or an extra file is refused). They are plain JSON lines, sorted, deterministic, keyed by **statement id** (Tengoku's `isnad1` id: what a theorem states, not what it is called), so a prover or a scrambler that reads them cannot see a theorem's name. `names.jsonl` is the single exception, for a consumer that has to show a name to a person.
+
+| file | what | use |
+| --- | --- | --- |
+| `shape.jsonl` | `{"shape": 8 hex, "ids": [...]}` | the cheap prefilter: a goal of this pattern shape may be stated by one of these statements; the full id decides, never the shape |
+| `graph.jsonl` | `{"id", "deps": [ids]}` | what each statement's proofs lean on directly (static, over the theorems that state it) |
+| `intent.jsonl`, `docs.jsonl` | inverted index and document lengths | words to statements: BM25 over the prose of the docstrings (inline code is dropped, so no identifier is indexed); `python3 tools/index/intent.py search <dir> "words" -k 10` |
+| `names.jsonl` | `{"id", "names": [...]}` | statement id to theorem names |
+
+Measured on the wide sample (4,778 theorems of 16 libraries, 17 layers; tenro run 44946576493): the shape and graph indexes cover **82,053 statements** (of 82,657 theorems that have a statement id), in **68,374 shapes** (7,091 of them shared by more than one statement: the prefilter has about 1.2 statements to confirm per shape), with **791,732 dependency edges** (372,151 dependencies are dropped because their statement has no id in the input). The intent index holds **13,413 statements with a docstring** (7,784 distinct tokens); 8,223 documented definitions are counted and not indexed, and 15,705 docstrings belong to declarations outside the snapshot. The files are 40.6 MB (`graph.jsonl` 27.0, `names.jsonl` 7.0, `shape.jsonl` 4.5, `intent.jsonl` 2.5, `docs.jsonl` 0.7), and the packed snapshot is 541,278,580 bytes, about 5.6 MB more than the same layers without them (run 44943029972). Building them took 6 minutes on the runner.
+
+What an index cannot do, stated: the intent index finds a statement by its docstring, so a theorem without a docstring, or one whose docstring is all code, is found by shape only; the docstring of a definition states nothing, so it is counted and not indexed; a query is words, not a formula (the shape index is the formula-side search); the shape is a prefilter with collisions (the stats file counts them), not an answer.
+
 ## What is active in a session, and what is not
 
 Carried (`tengai-replay --ext`, tengai ADR-0005): the constants and their proofs, instances (global), reducibility, classes, projection information, structure information (fields and parents: `p.x` through a parent), and the binder names and annotations of the source.
@@ -43,4 +62,4 @@ Read from the wide layered run (4,778 theorems of 16 libraries, 17 layers, tenro
 ## Not verified
 
 - A prover loop on a snapshot: Leak II (Pantograph over `LEAN_PATH`) and Leak IV (`lake serve`) have not been run on one. The environment fits their model (a prebuilt directory on `LEAN_PATH`, nothing built at request time); it has not been tried.
-- Retrieval: Leak I (Loogle over the imported modules) has not been run on a snapshot, and the retrieval indexes of the design (intent, shape, dependency graph) are not built for promoted content yet.
+- Retrieval: Leak I (Loogle over the imported modules) has not been run on a snapshot, and no search over the built indexes by a real consumer has been done. The indexes are built, hashed and shipped (run 44946576493); how well they retrieve (recall on held-out goals) is not measured.
