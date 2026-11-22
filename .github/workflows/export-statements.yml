@@ -303,6 +303,7 @@ jobs:
           PY
           cat "$RUNNER_TEMP/layer-order.txt" | cut -d' ' -f1 | tr '\n' ' '; echo
           : > "$RUNNER_TEMP/layer-stats.jsonl"
+          : > "$RUNNER_TEMP/ext-failures.txt"
           # the export is parsed once and every layer replays from the parsed file (a layer is its own process, tengai ADR-0005)
           /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample-stmt.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
@@ -318,6 +319,8 @@ jobs:
             fi
             /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --added "$RUNNER_TEMP/added/$module.jsonl" --stub-refused "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
             echo "$module: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/layer-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+            # an extension entry that Lean refused is counted in the layer's statistics (`ext.failed`) and its reason is on stderr: it stays in the log and in the artifact (the first whole-tree comparison lost 5 instances and could not say why)
+            grep '^ext: ' "$RUNNER_TEMP/layer-time.txt" | sed "s|^|$module |" | tee -a "$RUNNER_TEMP/ext-failures.txt" || true
           done < "$RUNNER_TEMP/layer-order.txt"
           find "$RUNNER_TEMP/layered" -name '*.olean' -printf '%s %P\n' | sort -k2
       - name: "Layers: what a session loads (the cold import of the foundation and of each topic with it, over an empty session; paired rounds, tools/promote/import_time.py)"
@@ -669,6 +672,7 @@ jobs:
             ${{ runner.temp }}/source-hashes-time.txt
             ${{ runner.temp }}/snapshot-hashes-time.txt
             ${{ runner.temp }}/layer-stats.jsonl
+            ${{ runner.temp }}/ext-failures.txt
             ${{ runner.temp }}/layer-order.txt
             ${{ runner.temp }}/tables-time.txt
             ${{ runner.temp }}/replay-*-time.txt

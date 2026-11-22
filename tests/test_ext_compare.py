@@ -97,11 +97,39 @@ class Compare(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["kinds"]["inst"]["differs"], 1)
 
+    def test_the_scoped_registrations_of_an_instance_are_compared_as_a_set_and_a_loss_is_a_loss(self):
+        a = [{"ns": ["Pointwise"], "prio": 1000}, {"ns": ["Classical"], "prio": 10}]
+        source = table(row(["i"], sinst=a))
+        r = E.compare(source, table(row(["i"], sinst=list(reversed(a)))), "global")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["kinds"]["sinst"], {"same": 1})
+        r = E.compare(source, table(row(["i"], sinst=[{"ns": ["Pointwise"], "prio": 1000}])), "global")  # one namespace missing
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["kinds"]["sinst"], {"differs": 1})
+        r = E.compare(source, table(row(["i"], red="reducible")), "global")  # the scoped instance did not make it
+        self.assertEqual((r["kinds"]["sinst"], r["examples"]["lost"][0]["kind"]), ({"lost": 1}, "sinst"))
+
     def test_the_examples_are_limited_and_the_counts_are_not(self):
-        source = table(*[row(["c", i], red="reducible") for i in range(20)])
+        n = E.EXAMPLES + 20
+        source = table(*[row(["c", i], red="reducible") for i in range(n)])
         r = E.compare(source, {}, "global")
-        self.assertEqual(r["totals"]["lost"], 20)
+        self.assertEqual(r["totals"]["lost"], n)
         self.assertEqual(len(r["examples"]["lost"]), E.EXAMPLES)
+
+    def test_every_example_says_what_each_side_holds_whatever_its_kind(self):
+        # the first run of a whole tree (snapshot-2): 9 differences and 5 losses that were listed by name only, and a binder annotation or a reducibility that differs cannot be judged from a name
+        source = table(row(["f"], bi=BI, red="reducible"), row(["g"], bi=BI), row(["only", "src"], red="reducible"))
+        snap = table(
+            row(["f"], bi=[[["a"], "implicit"], [["inst"], "instImplicit"]], red="reducible"),
+            row(["g"], bi=BI),
+            row(["only", "snap"], red="irreducible"),
+        )
+        r = E.compare(source, snap, "global")
+        (differs,), (lost,), (extra,) = r["examples"]["differs"], r["examples"]["lost"], r["examples"]["extra"]
+        self.assertEqual((differs["name"], differs["kind"]), ("f", "bi"))
+        self.assertEqual(differs["detail"], {"source": BI, "snapshot": [[["a"], "implicit"], [["inst"], "instImplicit"]]})
+        self.assertEqual((lost["name"], lost["detail"]), ("only.src", {"source": "reducible"}))
+        self.assertEqual((extra["name"], extra["detail"]), ("only.snap", {"snapshot": "irreducible"}))
 
     def test_two_empty_tables_compare_equal_and_a_mode_that_is_not_one_is_refused(self):
         self.assertTrue(E.compare({}, {}, "global")["ok"])
@@ -208,7 +236,10 @@ class Files(unittest.TestCase):
             with contextlib.redirect_stdout(out):
                 self.assertEqual(E.main([str(src), str(lost), "--instances", "global", "--out", str(d / "r2.json")]), 1)
             self.assertIn("PROBLEMS", out.getvalue())
-            self.assertIn("lost: Pt.x", out.getvalue())
+            self.assertIn("lost: Pt.x (proj)", out.getvalue())
+            self.assertIn(
+                '"source": {"cls": false, "ctor": ["Pt", "mk"], "i": 0, "np": 0}', out.getvalue()
+            )  # what the source holds is printed with the name
 
 
 if __name__ == "__main__":

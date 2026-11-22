@@ -66,6 +66,17 @@ class Partition(unittest.TestCase):
         self.assertEqual(report["layers"][ALPHA]["kinds"], {"proj": 1, "st": 1})
         self.assertEqual(report["kinds"], {"bi": 1, "class": 1, "inst": 1, "proj": 1, "red": 2, "st": 1})
 
+    def test_the_scoped_registrations_of_an_instance_are_a_kind_of_their_own_and_go_with_the_constant(self):
+        # `tengai-extinfo` could not see scoped instances before (0 of 42,314 instance rows of the whole tree said scoped): they are rows of their own, `sinst`, one entry for each namespace
+        rows = [
+            row(["instAddNat"], sinst=[{"ns": ["Add"], "prio": 10}]),
+            row(["Pt", "x"], sinst=[{"ns": ["Pt"], "prio": 1000}, {"ns": ["Q"], "prio": 5}]),
+        ]
+        placed, report = E.partition(rows, self.owner)
+        self.assertEqual((placed[FOUNDATION], placed[ALPHA]), ([rows[0]], [rows[1]]))
+        self.assertEqual(report["kinds"], {"sinst": 2})
+        self.assertEqual(report["layers"][ALPHA]["kinds"], {"sinst": 1})
+
     def test_scoped_instances_are_counted_apart_because_the_replay_registers_them_as_global(self):
         rows = [
             row(["instAddNat"], inst={"prio": 1000, "kind": "scoped"}),

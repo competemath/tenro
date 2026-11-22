@@ -3,7 +3,7 @@
 
   ext_partition.py EXT.jsonl --layers DIR --out OUT_DIR
 
-EXT.jsonl is what `tengai-extinfo` printed in Tengoku's environment for every constant of the layers (one JSON object a line, `{"n": [name components], ...}` with `red`, `proj`, `class`, `st`, `inst` and `bi`, the
+EXT.jsonl is what `tengai-extinfo` printed in Tengoku's environment for every constant of the layers (one JSON object a line, `{"n": [name components], ...}` with `red`, `proj`, `class`, `st`, `inst`, `sinst` (the namespaces an instance is scoped in) and `bi`, the
 entries Lean keeps about a constant outside the kernel and the binder annotations of its type). DIR is what `layers.py` wrote (`layers.json` and the `<module>.constants.jsonl` of every layer). Each layer is
 replayed by its own process (`tengai-replay --only ... --ext`): given the whole file, every one of the (hundreds of) processes would parse all of it, and Lean's JSON reader is slow, so each gets the rows of
 the constants it adds and nothing else. The counts per kind include `inst_scoped`, the instances that are scoped in Tengoku (active only where their namespace is open): the replay registers every instance as
@@ -22,7 +22,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-KINDS = ("red", "proj", "class", "st", "inst", "bi")
+KINDS = ("red", "proj", "class", "st", "inst", "sinst", "bi")
 
 
 def owners(layers_dir: Path) -> tuple[dict[tuple, str], list[str]]:

@@ -246,6 +246,21 @@ def test_the_selftest_must_print_the_success_line_the_real_run_is_read_from_and_
     )
 
 
+def test_a_refused_extension_entry_is_kept_with_its_reason_in_the_log_and_the_artifact():
+    # the first whole-tree comparison lost 5 instances ("failed": 3 and 2 in two layers) and the reasons, on stderr, went with the file they were redirected to
+    replays = [r for _, r in runs() if '--stub-refused "${args[@]}"' in r and "--tables" in r]
+    assert len(replays) == 1
+    run = replays[0]
+    assert '2> "$RUNNER_TEMP/layer-time.txt"' in run, "the replay's stderr is where the reasons are"
+    assert ': > "$RUNNER_TEMP/ext-failures.txt"' in run, "an empty file when no layer has a failure, and not the file of an earlier step"
+    # a layer without a failure must not end the step: grep exits 1 on no line and the step runs with -e -o pipefail
+    assert 'grep \'^ext: \' "$RUNNER_TEMP/layer-time.txt" | sed "s|^|$module |" | tee -a "$RUNNER_TEMP/ext-failures.txt" || true' in run
+    upload = [
+        s for s in JOB if "upload-artifact" in s.get("uses", "") and str(s.get("with", {}).get("name", "")).startswith("export-statements")
+    ]
+    assert len(upload) == 1 and "ext-failures.txt" in upload[0]["with"]["path"]
+
+
 def test_every_layer_says_which_constants_it_added_and_the_comparison_judges_only_those():
     replays = [r for _, r in runs() if '--stub-refused "${args[@]}"' in r and "--tables" in r]
     assert len(replays) == 1
