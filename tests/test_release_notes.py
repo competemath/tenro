@@ -166,7 +166,19 @@ class Texts(unittest.TestCase):
         self.assertIn("read back by the same tool", text)
         self.assertIn("900 entries the same, 0 differ, 0 lost, 0 extra", text)
         self.assertIn("instances registered global, of which 7 are the other way in Tengoku ({'scoped_became_global': 7})", text)
-        self.assertIn("of Lean core's own constants, which the replay leaves alone, 1 entries differ from Tengoku's", text)
+        self.assertIn(
+            "of Lean core's own constants, which the replay leaves alone, 1 entry differs from Tengoku's", text
+        )  # read off the real notes of the first rehearsal: "1 entries"
+        self.assertIn("and is not judged;", text)
+        m2 = copy.deepcopy(m)
+        m2["checks"]["ext_faithful"]["core"]["differs"] = 3
+        self.assertIn("3 entries differ from Tengoku's", N.notes_md(m2, "snapshot-x", "1", 100, SHA))
+        self.assertIn(
+            "**What was not checked.** An independent kernel over the layers; a prover", N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        )
+        m3 = copy.deepcopy(MANIFEST)
+        m3["checks"]["nanoda"] = {"status": "ok", "declarations": 5}
+        self.assertIn("**What was not checked.** A prover or a Leak environment", N.notes_md(m3, "snapshot-x", "1", 100, SHA))
         no_core = copy.deepcopy(m)
         no_core["checks"]["ext_faithful"]["core"] = (
             None  # a comparison that did not know which constants the replay added says nothing about core's

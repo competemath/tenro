@@ -130,7 +130,7 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
                 f"- **the extension entries read back by the same tool** (`tengai-extinfo`) in Tengoku's environment and in the snapshot's: {ef['same']:,} entries the same, {ef['differs']:,} differ, {ef['lost']:,} lost, {ef['extra']:,} extra; "
                 f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'})"
                 + (
-                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} entries differ from Tengoku's (a library changed what core says about them) and are not judged;"
+                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} {'entry differs' if ef['core']['differs'] == 1 else 'entries differ'} from Tengoku's (a library changed what core says about them) and {'is' if ef['core']['differs'] == 1 else 'are'} not judged;"
                     if ef.get("core")
                     else ";"
                 )
@@ -142,8 +142,8 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
     lines += [
         "",
         "**What was not checked.** "
-        + ("" if nanoda else "An independent kernel over the layers; ")
-        + "a prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
+        + ("A" if nanoda else "An independent kernel over the layers; a")
+        + " prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
         "",
         "**Made from.** " + ", ".join(f"{k} `{v}`" for k, v in sorted(pins.items())) + f" (workflow run {run}).",
         "",
