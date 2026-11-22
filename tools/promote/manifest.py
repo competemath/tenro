@@ -196,7 +196,11 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
             "constants_added": sum((x["replay"] or {}).get("added", 0) for x in layers) if stats_lines else None,
             "theorems": len(sample),
             # a statements snapshot: the declarations the kernel refused and that stand as axioms of their type (tengai-replay --stub-refused); None when no replay statistics were left
-            **({"refused": sum(len((x["replay"] or {}).get("refused") or []) for x in layers) if stats_lines else None} if flavor == "statements" else {}),
+            **(
+                {"refused": sum(len((x["replay"] or {}).get("refused") or []) for x in layers) if stats_lines else None}
+                if flavor == "statements"
+                else {}
+            ),
         },
         "checks": {
             "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
@@ -216,7 +220,10 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
             else {
                 "baseline": load.get("empty"),
                 "sets": {
-                    row[0]: {"olean_mb": round(row[1], 1), **{k: row[2][k] for k in ("median", "net_median", "net_min", "constants") if k in row[2]}}
+                    row[0]: {
+                        "olean_mb": round(row[1], 1),
+                        **{k: row[2][k] for k in ("median", "net_median", "net_min", "constants") if k in row[2]},
+                    }
                     for row in load["rows"]
                     if isinstance(row[2], dict)
                 },
@@ -235,7 +242,11 @@ def main_layers(argv: list[str]) -> int:
         "--indexes",
         help="the directory of the retrieval indexes (build.py and intent.py wrote it): recorded with its hashes, packed with the snapshot",
     )
-    ap.add_argument("--flavor", choices=["statements"], help="a snapshot of the statements flavor (docs/statements.md): recorded, and the declarations the kernel refused are counted")
+    ap.add_argument(
+        "--flavor",
+        choices=["statements"],
+        help="a snapshot of the statements flavor (docs/statements.md): recorded, and the declarations the kernel refused are counted",
+    )
     a = ap.parse_args(argv)
     m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None, a.flavor)
     with open(a.out, "w", encoding="utf-8") as f:

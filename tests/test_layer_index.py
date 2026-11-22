@@ -21,7 +21,16 @@ def write_layers(d: Path, names: dict[str, list[list]]) -> None:
         file = f"{module}.names.jsonl"
         (d / file).write_text("".join(json.dumps(u) + "\n" for u in units), encoding="utf-8")
         topic = None if module == FOUNDATION else module.rsplit(".", 1)[-1]
-        layers.append({"module": module, "topic": topic, "imports": [] if topic is None else [FOUNDATION], "units": len(units), "constants": len(units), "file": file})
+        layers.append(
+            {
+                "module": module,
+                "topic": topic,
+                "imports": [] if topic is None else [FOUNDATION],
+                "units": len(units),
+                "constants": len(units),
+                "file": file,
+            }
+        )
     (d / "layers.json").write_text(json.dumps({"layers": layers, "topics": {}, "totals": {}}), encoding="utf-8")
 
 
