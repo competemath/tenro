@@ -12,7 +12,8 @@ the replay did NOT add is one that **Lean core already holds**, and the replay l
 (priority := 910)` and Tengoku has it at 1100) and the snapshot cannot carry that. Those constants are compared all the same and reported apart, as **core**: a count, never part of `ok`. Without `--added` every
 constant counts.
 
-Per constant, per kind: **same**, **differs** (the row says another thing), **lost** (the source has it and the snapshot has not), **extra** (the snapshot has it and the source has not). An instance's priority
+Per constant, per kind: **same**, **differs** (the row says another thing), **lost** (the source has it and the snapshot has not), **extra** (the snapshot has it and the source has not). The first EXAMPLES of each
+are listed with what each side says (a snapshot with a dozen of them must be able to be read from its own log, and the first run of a whole tree had 9 differences and 5 losses that showed their names only). An instance's priority
 must agree; its kind is judged against `--instances`: the replay registers every instance as GLOBAL (`global`) or every instance as SCOPED to the namespace of its module (`scoped`), whatever kind the source row
 says, so the instances that Tengoku has the other way are counted as **deviations**, not as differences: they are known and by construction, the number is what the owner has to decide about (a scoped instance of
 Tengoku, `Classical.propDecidable` is one, that a `global` snapshot makes global behaves differently there). `ok` is true when nothing is lost, extra or different; deviations do not make it false and are always reported.
@@ -27,7 +28,7 @@ from collections import Counter
 from pathlib import Path
 
 KINDS = ("red", "proj", "class", "st", "inst", "bi")
-EXAMPLES = 5
+EXAMPLES = 40
 
 
 def read(path: Path) -> dict[tuple, dict]:
@@ -96,14 +97,18 @@ def compare(source: dict[tuple, dict], snapshot: dict[tuple, dict], mode: str, a
             detail = None
             if x is None:
                 category = "extra"
+                detail = {"snapshot": y}
             elif y is None:
                 category = "lost"
+                detail = {"source": x}
             elif kind == "inst":
                 category = compare_inst(x, y, mode)
                 if category != "same":
                     detail = {"source": x, "snapshot": y}
             else:
                 category = "same" if x == y else "differs"
+                if category == "differs":
+                    detail = {"source": x, "snapshot": y}
             if core:
                 core_counts[category] += 1
                 if category != "same":
