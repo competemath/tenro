@@ -54,3 +54,33 @@ def test_the_export_says_how_it_was_made_and_a_replay_must_agree():
 
 def test_the_manifest_pins_the_flag():
     assert any('--pin "drop_proofs=' in r for _, r in runs())
+
+
+def test_the_extension_rows_are_read_for_every_constant_not_only_the_first_name_of_each_unit():
+    # tengai-extinfo looks up the names it is given and expands nothing: the constructors and recursors of an inductive block have binder annotations to restore too
+    steps = [(n, r) for n, r in runs() if "tengai-extinfo" in r and "lake env" in r]
+    assert len(steps) == 1, [n for n, _ in steps]
+    run = steps[0][1]
+    assert "layers/*.constants.jsonl" in run and "names.jsonl" not in run.replace("ext-names.jsonl", "")
+    assert "ext_partition.py" in run, "every row must belong to a layer, checked in the run that has Tengoku"
+
+
+def test_a_layer_is_replayed_with_its_own_rows_and_never_with_all_of_them():
+    replays = [r for _, r in runs() if '--stub-refused "${args[@]}"' in r and "--tables" in r]
+    assert len(replays) == 1
+    run = replays[0]
+    assert "ext_partition.py" in run
+    assert '--ext "$RUNNER_TEMP/ext/$module.ext.jsonl"' in run
+    assert '--ext "$RUNNER_TEMP/ext.jsonl"' not in run, "every layer would parse every row"
+
+
+def test_the_extension_rows_are_kept_with_the_export_and_taken_back_by_a_replay():
+    kept = [r for _, r in runs() if 'kept/ext.jsonl.zst"' in r and "zstd -3" in r]
+    taken = [r for _, r in runs() if 'kept/ext.jsonl.zst"' in r and "zstd -d" in r]
+    assert (len(kept), len(taken)) == (1, 1)
+
+
+def test_the_extension_input_defaults_to_nothing_changed():
+    data = yaml.safe_load(WORKFLOW.read_text())
+    triggers = data.get("on") or data.get(True)
+    assert triggers["workflow_dispatch"]["inputs"]["ext_rows"]["default"] == "false"

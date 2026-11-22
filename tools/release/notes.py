@@ -33,6 +33,9 @@ def gates(m: dict) -> list[str]:
         problems.append("the comparison with Tengoku's environment did not run")
     elif not faithful.get("ok"):
         problems.append(f"the comparison with Tengoku's environment found problems: {faithful.get('problems')}")
+    ext = checks.get("extensions")
+    if ext is not None and not ext.get("ok"):
+        problems.append(f"Lean refused {ext.get('failed')} extension entries the snapshot was to carry")
     attribution = m.get("attribution")
     if attribution is None:
         problems.append("the manifest has no attribution")
@@ -68,13 +71,22 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
     cap = (checks.get("session_load") or {}).get("cap")
     f = checks["faithful"]
     att = m["attribution"]
+    ext = checks.get("extensions")
+    carries = (
+        "It carries the constants and, from Tengoku, the extension entries Lean keeps about them "
+        f"({ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, {ext['reducibility']:,} reducibility attributes; `tengai-replay --ext`), "
+        "and no simp sets, notation, macros or tactics."
+        if ext
+        else "It carries constants only, no instances, simp sets, notation or tactics."
+    )
     lines = [
         f"# {tag}: Tengoku's statements as a layered snapshot (experimental)",
         "",
         f"**What it is.** {t['theorems']:,} theorem statements of {len(m['libraries'])} libraries, as a foundation and one layer per library of built `.olean` files "
         f"({t['olean_bytes'] / 1e9:.2f} GB; {archive_bytes / 1e6:,.0f} MB as the archive below). A theorem stands as an **axiom of its type**: its proof is not in it, except the proofs a definition computes through. "
         "It is a base for search and for applying statements, not a proof library: a result found in it must be checked in an environment that has the real proofs (invariant I1, untrusted search and trusted checking). "
-        "It carries constants only, no instances, simp sets, notation or tactics. It is Tengoku **at the pin** named below, and it is **experimental**: no version promise, no stability, not a v1.",
+        + carries
+        + " It is Tengoku **at the pin** named below, and it is **experimental**: no version promise, no stability, not a v1.",
         "",
         "**What was checked.**",
         f"- the kernel accepted every declaration of every layer ({t.get('refused', 0)} refused of {t['constants_added']:,} constants added);",
@@ -82,6 +94,11 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         f"{f['statement_stubs']:,} theorems stand as axioms of their type, {f['kept_with_value']:,} are kept with their proof, {f['same_with_value'] + f['same_without_value']:,} definitions and other declarations agree, "
         f"{f['refused_and_stubbed']:,} were stubbed after a refusal; problems: {f['problems'] or 'none'}. The hash is Lean's 32 bits: a difference is certain, an agreement makes one very unlikely and is not a proof;",
     ]
+    if ext:
+        lines.append(
+            f"- extension entries put back in {ext['layers']} layers: {ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, "
+            f"{ext['reducibility']:,} reducibility attributes; refused by Lean: {ext['failed']};"
+        )
     if worst and cap:
         lines.append(
             f"- every session (the foundation and one library) over an empty module, paired medians: the slowest is {worst[0]} at +{worst[1]['net_median']:.3f} s; the cap is {cap} s;"

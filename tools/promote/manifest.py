@@ -184,6 +184,20 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
     faithful = read_json(d / "faithful.json")
     attribution = read_json(d / "attribution.json")
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
+    ext_counts = [x["extensions"] for x in layers if x["extensions"]]
+    extensions = (
+        None
+        if not ext_counts
+        else {
+            "layers": len(ext_counts),
+            **{
+                k: sum(e.get(k, 0) for e in ext_counts)
+                for k in ("reducibility", "projections", "structures", "classes", "instances", "failed")
+            },
+        }
+    )
+    if extensions:
+        extensions["ok"] = extensions["failed"] == 0  # an entry Lean refused is counted, never hidden
     return {
         "schema": 2,
         **({"flavor": flavor} if flavor else {}),
@@ -208,6 +222,8 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
         },
         "checks": {
             "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
+            # the extension entries carried back from Tengoku (tengai-replay --ext: reducibility, projections, structures, classes, instances) summed over the layers that carried them: null when no layer did
+            "extensions": extensions,
             "nanoda": {"status": status, "declarations": int(declared[-1]) if declared else None} if status else None,
             "statement_ids": None
             if ids is None
