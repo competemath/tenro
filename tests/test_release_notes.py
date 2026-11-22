@@ -20,6 +20,12 @@ MANIFEST = {
     "layers": [{"module": "TengaiData.Foundation"}, {"module": "TengaiData.Topic.Alpha"}],
     "pins": {"tengoku": "1d727eb", "tengai": "v0.0.18"},
     "totals": {"olean_bytes": 3_900_000_000, "constants_added": 612257, "theorems": 311773, "refused": 0},
+    "legal": {
+        "files": {"ATTRIBUTION.md": {"bytes": 10, "sha256": "c" * 64}, "LICENSES/INDEX.json": {"bytes": 10, "sha256": "d" * 64}},
+        "sources": 2,
+        "licence_files": 3,
+        "problems": 0,
+    },
     "attribution": {
         "libraries": {
             "alpha": {"sources": [{"repo": "https://github.com/o/alpha", "commit": "a" * 40, "licence": "Apache-2.0"}], "records": 10},
@@ -65,6 +71,9 @@ class Gates(unittest.TestCase):
             "faithful did not run": lambda m: m["checks"].update(faithful=None),
             "faithful found problems": lambda m: m["checks"]["faithful"].update(ok=False, problems={"type_differs": 2}),
             "no attribution": lambda m: m.pop("attribution"),
+            "no licence texts": lambda m: m.pop("legal"),
+            "a source without a licence text": lambda m: m["legal"].update(problems=2),
+            "licence texts of an unknown state": lambda m: m["legal"].update(problems=None),
             "a library without a licence": lambda m: m["attribution"].update(unknown=["beta"]),
         }
         for name, break_it in cases.items():
@@ -109,6 +118,8 @@ class Texts(unittest.TestCase):
             "independent kernel",
             "ATTRIBUTION.md",
             "Apache-2.0: 1, MIT: 1",
+            "3 files of 2 repositories",
+            "legal/LICENSES/",
             SHA,
         ):
             self.assertIn(needle, text)

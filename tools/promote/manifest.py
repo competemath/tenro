@@ -141,7 +141,24 @@ def index_record(indexes: Path) -> dict:
     return rec
 
 
-def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None, flavor: str | None = None) -> dict:
+def legal_record(legal: Path) -> dict:
+    """the licence texts and notices a snapshot carries (`tools/release/licences.py`): every file with its size and sha256 (relative to the directory, `/`-separated), and what the writer found: how many sources
+    (a repository at a commit), how many licence and notice files, and the sources without a text that stands behind the registry's licence (`problems`)"""
+    files = sorted(p for p in legal.rglob("*") if p.is_file())
+    if not files:
+        raise SystemExit(f"manifest: {legal} holds no file")
+    index = read_json(legal / "LICENSES" / "INDEX.json") or {}
+    return {
+        "files": {p.relative_to(legal).as_posix(): sha256_and_sizes(p) for p in files},
+        "sources": index.get("sources"),
+        "licence_files": index.get("files"),
+        "problems": len(index["problems"]) if "problems" in index else None,
+    }
+
+
+def build_layers(
+    d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None, flavor: str | None = None, legal: Path | None = None
+) -> dict:
     """the record of a promotion in layers (schema 2): every layer with what it imports, what it holds, what its replay added and the hash and size of its olean; the checks of the whole (independent kernel over all
     the layers, statement ids, axioms, what a session loads). A layer whose file is missing is an error, a check that did not run is null."""
     plan = json.loads((d / "layers" / "layers.json").read_text(encoding="utf-8"))
@@ -204,6 +221,8 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
         # where the content comes from: per library the repository, the commit and the licence (tools/promote/attribution.py)
         **({"attribution": attribution} if attribution is not None else {}),
         **({"indexes": index_record(indexes)} if indexes is not None else {}),
+        # the licence texts and notices of the libraries, packed with the snapshot under legal/ (tools/release/licences.py)
+        **({"legal": legal_record(legal)} if legal is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
         # a statements snapshot has hundreds of thousands of theorems: the table of which layer holds which is the layers index (tools/promote/layer_index.py), not a list in the manifest
@@ -285,12 +304,23 @@ def main_layers(argv: list[str]) -> int:
         help="the directory of the retrieval indexes (build.py and intent.py wrote it): recorded with its hashes, packed with the snapshot",
     )
     ap.add_argument(
+        "--legal",
+        help="the directory of the licence texts and notices (licences.py wrote it): recorded with its hashes, packed with the snapshot under legal/",
+    )
+    ap.add_argument(
         "--flavor",
         choices=["statements"],
         help="a snapshot of the statements flavor (docs/statements.md): recorded, and the declarations the kernel refused are counted",
     )
     a = ap.parse_args(argv)
-    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None, a.flavor)
+    m = build_layers(
+        Path(a.dir),
+        Path(a.layered),
+        dict(p.split("=", 1) for p in a.pin),
+        Path(a.indexes) if a.indexes else None,
+        a.flavor,
+        Path(a.legal) if a.legal else None,
+    )
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(json.dumps(m, indent=1, sort_keys=True) + "\n")
     print(

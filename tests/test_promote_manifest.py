@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -297,6 +299,50 @@ class ManifestLayers(unittest.TestCase):
             self.assertIsNone(
                 M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["extensions"]
             )  # no layer carried any: null, not zero
+
+    def test_the_licence_texts_are_recorded_with_their_hashes_and_what_the_writer_found_and_absent_means_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            legal = d / "legal"
+            (legal / "LICENSES" / "o").mkdir(parents=True)
+            (legal / "ATTRIBUTION.md").write_text("# a\n")
+            (legal / "LICENSES" / "o" / "LICENSE").write_text("MIT\n")
+            (legal / "LICENSES" / "INDEX.json").write_text(json.dumps({"sources": 3, "files": 5, "problems": [{"repo": "x"}]}))
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)
+            self.assertEqual(sorted(m["legal"]["files"]), ["ATTRIBUTION.md", "LICENSES/INDEX.json", "LICENSES/o/LICENSE"])
+            self.assertEqual(m["legal"]["files"]["LICENSES/o/LICENSE"]["bytes"], 4)
+            self.assertEqual((m["legal"]["sources"], m["legal"]["licence_files"], m["legal"]["problems"]), (3, 5, 1))
+            self.assertNotIn(
+                "legal", M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            )  # none given: none recorded, never an empty record
+            (legal / "LICENSES" / "INDEX.json").write_text(json.dumps({"sources": 3, "files": 5, "problems": []}))
+            self.assertEqual(M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)["legal"]["problems"], 0)
+            (legal / "LICENSES" / "INDEX.json").unlink()
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)["legal"]["problems"]
+            )  # an index that is not there says nothing: not zero
+
+    def test_main_takes_the_legal_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "legal").mkdir()
+            (d / "legal" / "ATTRIBUTION.md").write_text("# a\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    M.main_layers(
+                        ["--dir", str(d), "--layered", str(d / "layered"), "--out", str(d / "m.json"), "--legal", str(d / "legal")]
+                    ),
+                    0,
+                )
+            self.assertEqual(list(json.loads((d / "m.json").read_text())["legal"]["files"]), ["ATTRIBUTION.md"])
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "empty").mkdir()
+            with self.assertRaises(SystemExit):
+                M.build_layers(d, d / "layered", {}, legal=d / "empty")
 
     def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
         with tempfile.TemporaryDirectory() as d:
