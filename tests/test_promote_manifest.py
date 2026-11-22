@@ -332,6 +332,7 @@ class ManifestLayers(unittest.TestCase):
                 "instances": "global",
                 "totals": {"same": 10, "differs": 1, "lost": 2, "extra": 0, "deviation": 3},
                 "deviations": {"scoped_became_global": 3},
+                "core": {"constants": 5, "same": 9, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
                 "ok": False,
                 "examples": {"lost": [{"name": "x"}]},
             }
@@ -347,6 +348,7 @@ class ManifestLayers(unittest.TestCase):
                     "extra": 0,
                     "deviation": 3,
                     "deviations": {"scoped_became_global": 3},
+                    "core": {"constants": 5, "same": 9, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
                     "ok": False,
                 },
             )

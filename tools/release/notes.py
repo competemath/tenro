@@ -128,7 +128,12 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         if ef:
             lines.append(
                 f"- **the extension entries read back by the same tool** (`tengai-extinfo`) in Tengoku's environment and in the snapshot's: {ef['same']:,} entries the same, {ef['differs']:,} differ, {ef['lost']:,} lost, {ef['extra']:,} extra; "
-                f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'});"
+                f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'})"
+                + (
+                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} entries differ from Tengoku's (a library changed what core says about them) and are not judged;"
+                    if ef.get("core")
+                    else ";"
+                )
             )
     if worst and cap:
         lines.append(

@@ -251,6 +251,8 @@ def build_layers(
                 "instances": ext_faithful["instances"],
                 **{k: ext_faithful["totals"][k] for k in ("same", "differs", "lost", "extra", "deviation")},
                 "deviations": ext_faithful["deviations"],
+                # Lean core's own constants (the replay leaves them alone): compared, reported, never judged; null when the comparison did not know which constants the replay added
+                "core": ext_faithful.get("core"),
                 "ok": ext_faithful["ok"],
             },
             "nanoda": {"status": status, "declarations": int(declared[-1]) if declared else None} if status else None,
