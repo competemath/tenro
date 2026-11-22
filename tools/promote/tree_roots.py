@@ -9,7 +9,7 @@ A release that cannot hold a library (its licence text is missing at the commit 
 
 Leaving a library out is not enough on its own: a library that imports it would carry its definitions into the export (a constant a statement reaches is in the export), so every library that imports an excluded one is
 left out too, and so on until nothing kept imports anything left out. The libraries are the modules `Tengoku/All.lean` imports; a module belongs to the library whose root is the longest prefix of its name, and a library
-imports another when a file under its root has an `import` of a module of the other. Only the header of a file is read (comments, `prelude` and the `import` lines, in any of the forms of Lean 4.34: `public import`,
+imports another when a file it owns has an `import` of a module of the other (a file belongs to the library that owns its module name, so a root that is an umbrella, like the seeded `Tengoku`, owns only what no library owns). Only the header of a file is read (comments, `prelude` and the `import` lines, in any of the forms of Lean 4.34: `public import`,
 `meta import`, `import all`), as Lean reads it: an `import` in a docstring or after the first command is not an import.
 
 `--roots-out` gets one root module per line: `Tengoku.All` when nothing is excluded (the export is then the one it always was), the kept roots otherwise. `--report` says what was left out and why: each library asked for
@@ -87,15 +87,6 @@ def read_imports(path: Path) -> list[str]:
         return header_imports(head + f.read())[0]  # the header may run on past what was read
 
 
-def files_of(tree: Path, root: str) -> list[Path]:
-    """the sources of the library with this root module: `A/B.lean` and everything under `A/B/`"""
-    base = tree.joinpath(*root.split("."))
-    found = [base.with_suffix(".lean")] if base.with_suffix(".lean").is_file() else []
-    if base.is_dir():
-        found += sorted(base.rglob("*.lean"))
-    return found
-
-
 def owner_of(module: str, roots: set[str]) -> str | None:
     """the library a module belongs to: the longest root that is the module or a prefix of it at a dot"""
     parts = module.split(".")
@@ -105,18 +96,33 @@ def owner_of(module: str, roots: set[str]) -> str | None:
     return None
 
 
-def import_graph(tree: Path, roots: list[str]) -> dict[str, dict[str, str]]:
-    """for each library, the other libraries it imports, each with the first import that says so (`file: module`)"""
+def sources(tree: Path, roots: set[str]) -> list[Path]:
+    """every source under the top directories the roots name (`Tengoku/` for `Tengoku.A`), and a root module that is a file of its own at the top (`Tengoku.lean`)"""
+    tops = sorted({r.split(".")[0] for r in roots})
+    found = [tree / f"{t}.lean" for t in tops if (tree / f"{t}.lean").is_file()]
+    for t in tops:
+        if (tree / t).is_dir():
+            found += sorted((tree / t).rglob("*.lean"))
+    return found
+
+
+def import_graph(tree: Path, roots: list[str], skip: set[str] = frozenset()) -> dict[str, dict[str, str]]:
+    """for each library, the other libraries it imports, each with the first import that says so (`file: module`).
+
+    A file belongs to the library that owns its module name, not to the library whose directory it is under: a root can be an umbrella (`Tengoku`, the seeded root, is a prefix of every other root and
+    owns the modules no library owns), and then it owns only those. `skip` names modules that import everything on purpose (the aggregate) and belong to no library."""
     rootset = set(roots)
-    graph: dict[str, dict[str, str]] = {}
-    for root in roots:
-        deps: dict[str, str] = {}
-        for path in files_of(tree, root):
-            for mod in read_imports(path):
-                other = owner_of(mod, rootset)
-                if other is not None and other != root and other not in deps:
-                    deps[other] = f"{path.relative_to(tree).as_posix()}: {mod}"
-        graph[root] = deps
+    graph: dict[str, dict[str, str]] = {r: {} for r in roots}
+    for path in sources(tree, rootset):
+        module = ".".join(path.relative_to(tree).with_suffix("").parts)
+        owner = owner_of(module, rootset)
+        if owner is None or module in skip:
+            continue
+        deps = graph[owner]
+        for mod in read_imports(path):
+            other = owner_of(mod, rootset)
+            if other is not None and other != owner and other not in deps:
+                deps[other] = f"{path.relative_to(tree).as_posix()}: {mod}"
     return graph
 
 
@@ -189,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         result = {"excluded": [], "kept": roots}
         lines = [all_module]  # nothing left out: the export imports the aggregate, as it always did
     else:
-        result = plan(roots, import_graph(a.tree, roots), exclude)
+        result = plan(roots, import_graph(a.tree, roots, skip={all_module}), exclude)
         lines = result["kept"]
         if not lines:
             raise SystemExit("tree_roots: every library is left out")
