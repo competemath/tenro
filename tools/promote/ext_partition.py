@@ -6,7 +6,8 @@
 EXT.jsonl is what `tengai-extinfo` printed in Tengoku's environment for every constant of the layers (one JSON object a line, `{"n": [name components], ...}` with `red`, `proj`, `class`, `st`, `inst` and `bi`, the
 entries Lean keeps about a constant outside the kernel and the binder annotations of its type). DIR is what `layers.py` wrote (`layers.json` and the `<module>.constants.jsonl` of every layer). Each layer is
 replayed by its own process (`tengai-replay --only ... --ext`): given the whole file, every one of the (hundreds of) processes would parse all of it, and Lean's JSON reader is slow, so each gets the rows of
-the constants it adds and nothing else.
+the constants it adds and nothing else. The counts per kind include `inst_scoped`, the instances that are scoped in Tengoku (active only where their namespace is open): the replay registers every instance as
+global, so those are the ones whose behaviour differs from Tengoku's.
 
 Writes, in OUT_DIR, `<module>.ext.jsonl` for each layer that has a row (the lines as they were read, in their order), and `ext-partition.json`: how many rows, how many were placed, and per layer and in all how many
 of each kind. **A row of a constant that no layer holds is an error** (the names were asked of the layers, so a row outside them means the two disagree: nothing is dropped without a word), and so is a line that is
@@ -57,7 +58,12 @@ def partition(lines, owner: dict[tuple, str]) -> tuple[dict[str, list[str]], dic
                 f"ext_partition: the row of {'.'.join(str(c) for c in name)} (line {total}) names a constant that no layer holds"
             )
         rows.setdefault(module, []).append(ln if ln.endswith("\n") else ln + "\n")
-        kinds.setdefault(module, Counter()).update(k for k in KINDS if k in row)
+        counter = kinds.setdefault(module, Counter())
+        counter.update(k for k in KINDS if k in row)
+        if isinstance(row.get("inst"), dict) and row["inst"].get("kind") == "scoped":
+            counter["inst_scoped"] += (
+                1  # a scoped instance: tengai-replay --ext registers every instance as global (or all as scoped), so this is the number that behaves differently from Tengoku's
+            )
     report = {
         "rows": total,
         "placed": sum(len(v) for v in rows.values()),
