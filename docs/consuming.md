@@ -34,6 +34,8 @@ LEAN_PATH="snapshot:$(lake env printenv LEAN_PATH)" lake env lean problem.lean
 
 `import TengaiData.Foundation` and `import TengaiData.Topic.<Name>` (a topic layer imports the foundation: importing a topic is enough). A session loads the foundation and the topics it imports, not the rest.
 
+To find the layer of a theorem, `python3 tools/release/use.py SNAPSHOT_DIR --theorem Nat.add_comm` (or `--topic aintlib`, several of each) reads `indexes/layers.jsonl` and prints the `import` lines, the layers and the number of constants a session would load, and the `LEAN_PATH` line; `--header FILE` writes the imports to a file a problem can be appended to, `--list-topics` lists the topics. A theorem the index does not know is an error that names the closest names. (Run on the rehearsal snapshot of run 45021032830, the layer of one of aintlib's theorems loads 42,278 constants: the figure of the sessions table.)
+
 ## Retrieval indexes
 
 `pack.py verify` unpacks `indexes/` next to the layers and checks each file against the manifest (the files in the folder are exactly the files the manifest lists: a missing, a changed or an extra file is refused). They are plain JSON lines, sorted, deterministic, keyed by **statement id** (Tengoku's `isnad1` id: what a theorem states, not what it is called), so a prover or a scrambler that reads them cannot see a theorem's name. `names.jsonl` is the single exception, for a consumer that has to show a name to a person.
