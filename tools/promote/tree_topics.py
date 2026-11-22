@@ -4,7 +4,9 @@
   tree_topics.py MODULES.jsonl --out TOPICS.json [--sample-out SAMPLE.jsonl] [--root Tengoku] [--seed Seed] [--seed-depth 1]
 
 MODULES.jsonl is `Modules.lean` run in the tree's environment: one line `{"m": module, "n": [components]}` for every theorem a module declares. Every theorem becomes a root of a topic, so that the layers hold
-everything the theorems' statements reach (`layers.py` places only what some topic reaches). The topic is read off the module path below the root of the tree:
+everything the theorems' statements reach (`layers.py` places only what some topic reaches), **except an internal one**: a name with a string component that starts with an underscore (`_proof_4`, `_simp_1`, `_unary`,
+everything under `_private`). `lean4export` without names, the export of a whole tree, skips exactly those (`Name.isInternal`) unless a statement reaches them, and `layers.py` refuses a topic whose theorem is not in
+the export; a layer places an internal theorem that a statement does reach by reachability, like any constant. The topic is read off the module path below the root of the tree:
 
   Tengoku.Seed.Algebra.Group.Basic     -> Seed/Algebra               (the first `--seed-depth` components below the seed: an area of the reseeded Mathlib; depth 2 is Seed/Algebra/Group)
   Tengoku.AddCombi.AddCombi.Mathlib.X  -> Intake/AddCombi            (anything else: the library, the first component below the root)
@@ -37,14 +39,29 @@ def topic_of(module: str, root: str, seed: str, seed_depth: int) -> str:
     return f"Intake/{below[0]}"
 
 
-def build(lines, root: str = "Tengoku", seed: str = "Seed", seed_depth: int = 1) -> dict[str, list[str]]:
+def is_internal(components) -> bool:
+    """Lean's `Name.isInternal`, on the components of a name: a string component that starts with an underscore (a number never makes a name internal)"""
+    return any(isinstance(c, str) and c.startswith("_") for c in components)
+
+
+def build_counting(lines, root: str = "Tengoku", seed: str = "Seed", seed_depth: int = 1) -> tuple[dict[str, list[str]], int]:
+    """the topics, and how many internal theorems were left out"""
     topics: dict[str, list[str]] = {}
+    left_out = 0
     for ln in lines:
         if not ln.strip():
             continue
         r = json.loads(ln)
-        topics.setdefault(topic_of(r["m"], root, seed, seed_depth), []).append(".".join(str(c) for c in r["n"]))
-    return {t: sorted(names) for t, names in sorted(topics.items())}
+        topic = topic_of(r["m"], root, seed, seed_depth)  # a module outside the root is refused whatever the theorem
+        if is_internal(r["n"]):
+            left_out += 1
+            continue
+        topics.setdefault(topic, []).append(".".join(str(c) for c in r["n"]))
+    return {t: sorted(names) for t, names in sorted(topics.items())}, left_out
+
+
+def build(lines, root: str = "Tengoku", seed: str = "Seed", seed_depth: int = 1) -> dict[str, list[str]]:
+    return build_counting(lines, root, seed, seed_depth)[0]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed-depth", type=int, default=1)
     a = ap.parse_args(argv)
     with open(a.modules, encoding="utf-8") as f:
-        topics = build(f, a.root, a.seed, a.seed_depth)
+        topics, left_out = build_counting(f, a.root, a.seed, a.seed_depth)
     a.out.write_text(json.dumps(topics), encoding="utf-8")
     if a.sample_out:
         with open(a.sample_out, "w", encoding="utf-8") as f:
@@ -68,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     seed_topics = {t: n for t, n in sizes.items() if t.split("/")[0] == a.seed}
     print(
         f"{len(topics)} topics ({len(seed_topics)} in the seed, {len(topics) - len(seed_topics)} libraries), {sum(sizes.values()):,} theorems "
-        f"({sum(seed_topics.values()):,} in the seed); largest: " + ", ".join(f"{t} {n:,}" for t, n in sizes.most_common(5))
+        f"({sum(seed_topics.values()):,} in the seed), {left_out:,} internal theorems left out (the export of a whole tree does not write them); largest: "
+        + ", ".join(f"{t} {n:,}" for t, n in sizes.most_common(5))
     )
     return 0
 
