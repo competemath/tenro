@@ -65,7 +65,7 @@ on:
         default: "false"
 permissions: {}
 concurrency:
-  group: export-statements
+  group: export-statements-${{ github.ref }}   # one run at a time on a branch; a run on another branch does not wait for it (a rehearsal at small scale beside a run of an hour)
   cancel-in-progress: false
 defaults:
   run:
