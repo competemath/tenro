@@ -80,6 +80,14 @@ class Gates(unittest.TestCase):
         self.assertEqual(N.gates(m), [])
         self.assertEqual(N.gates(MANIFEST), [])  # a snapshot without them (checks.extensions absent) is released as constants only
 
+    def test_an_independent_kernel_that_did_not_accept_stops_a_release_and_none_run_does_not(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["nanoda"] = {"status": "FAILED", "declarations": None}
+        self.assertIn("nanoda", " ".join(N.gates(m)))
+        m["checks"]["nanoda"] = {"status": "ok", "declarations": 700_000}
+        self.assertEqual(N.gates(m), [])
+        self.assertEqual(N.gates(MANIFEST), [])  # it did not run: the notes say so, the release is not stopped
+
     def test_a_problem_names_what_it_is(self):
         m = copy.deepcopy(MANIFEST)
         m["checks"]["faithful"].update(ok=False, problems={"type_differs": 2})
@@ -117,6 +125,18 @@ class Texts(unittest.TestCase):
         self.assertIn("no simp sets, notation, macros or tactics", text)
         self.assertNotIn("constants only", text)
         self.assertIn("refused by Lean: 0", text)
+
+    def test_the_notes_say_that_an_independent_kernel_accepted_the_layers_and_then_do_not_list_it_as_unchecked(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["nanoda"] = {"status": "ok", "declarations": 700_123}
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("700,123 declarations", text)
+        self.assertIn("axiom of its type there", text)
+        self.assertNotIn("An independent kernel over the layers", text)
+        self.assertIn("What was not checked", text)
+        without = N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        self.assertIn("An independent kernel over the layers", without)
+        self.assertNotIn("nanoda", without)
 
     def test_the_attribution_lists_every_library_with_its_repository_commit_and_licence(self):
         text = N.attribution_md(MANIFEST["attribution"], "snapshot-x")

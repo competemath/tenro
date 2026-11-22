@@ -100,3 +100,52 @@ def test_scoped_instances_are_asked_for_only_with_the_extension_entries_only_whe
     assert any('--pin "scoped_instances=${SCOPED_INSTANCES:-false}"' in r for _, r in runs()), (
         "the manifest says which mode the instances were registered in"
     )
+
+
+def nanoda_step():
+    steps = [(n, r) for n, r in runs() if "nanoda_bin" in r and "nanoda-layers" in r]
+    assert len(steps) == 1, [n for n, _ in steps]
+    return steps[0][1]
+
+
+def test_the_independent_kernel_reads_what_an_exporter_without_our_patch_writes_from_the_olean_files():
+    run = nanoda_step()
+    assert "lean4export-plain" in run and "patch" not in run.replace("our patch", ""), (
+        "nothing of ours between the .olean files and the checker"
+    )
+    assert 'checkout -q "$NANODA_COMMIT"' in run and 'checkout -q "$LEAN4EXPORT_COMMIT"' in run, "both tools at pinned commits"
+    assert "layered.ndjson" in run and "layer-order.txt" in run, "every replayed layer is exported"
+    exporter_runs = [ln for ln in run.splitlines() if "bin/lean4export" in ln and "layered.ndjson" in ln]
+    assert len(exporter_runs) == 1 and "lean4export-plain/.lake/build/bin/lean4export" in exporter_runs[0], exporter_runs
+    assert "lean4export/.lake/build/bin/lean4export" not in run, (
+        "the patched exporter of the other steps must not be the one the checker is fed from"
+    )
+
+
+def test_the_independent_kernel_has_a_selftest_and_a_control_that_must_stop_and_only_the_real_run_admits_the_stubs():
+    run = nanoda_step()
+    assert "Empty/export" in run, "the checker works at all"
+    # the control: every axiom an error; the export is full of statements that stand as axioms, so a pass means it did not read this export
+    assert 'conf "$RUNNER_TEMP/layered.ndjson" false true' in run and "the control passed" in run and "exit 1" in run
+    # the real run admits every axiom (the stubs) and still reports a hard error for nothing else
+    assert 'conf "$RUNNER_TEMP/layered.ndjson" true false' in run
+    assert run.count('conf "$RUNNER_TEMP/layered.ndjson" true') == 1, "only one run admits every axiom"
+
+
+def test_the_independent_kernel_writes_the_files_the_manifest_reads_and_the_artifact_keeps_them():
+    run = nanoda_step()
+    manifest = (WORKFLOW.parent.parent.parent / "tools" / "promote" / "manifest.py").read_text()
+    for name in ("nanoda-layers.status", "nanoda-layers.out"):
+        assert name in run and name in manifest, name
+    assert 'echo ok > "$RUNNER_TEMP/nanoda-layers.status"' in run and 'echo FAILED > "$RUNNER_TEMP/nanoda-layers.status"' in run
+    assert '> "$RUNNER_TEMP/nanoda-layers.out"' in run, "the manifest counts the declarations from this file"
+    upload = [s for s in JOB if "upload-artifact" in s.get("uses", "") and "statements-snapshot" in str(s.get("with", {}).get("name", ""))]
+    assert len(upload) == 1 and "nanoda-layers.out" in upload[0]["with"]["path"]
+
+
+def test_the_independent_kernel_input_defaults_to_nothing_changed():
+    data = yaml.safe_load(WORKFLOW.read_text())
+    triggers = data.get("on") or data.get(True)
+    assert triggers["workflow_dispatch"]["inputs"]["nanoda"]["default"] == "false"
+    step = next(s for s in JOB if "nanoda_bin" in s.get("run", "") and "nanoda-layers" in s["run"])
+    assert "env.NANODA == 'true'" in step["if"] and "env.LAYERS_REPLAY == 'true'" in step["if"]

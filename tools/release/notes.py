@@ -36,6 +36,9 @@ def gates(m: dict) -> list[str]:
     ext = checks.get("extensions")
     if ext is not None and not ext.get("ok"):
         problems.append(f"Lean refused {ext.get('failed')} extension entries the snapshot was to carry")
+    nanoda = checks.get("nanoda")
+    if nanoda is not None and nanoda.get("status") != "ok":
+        problems.append(f"the independent kernel (nanoda) did not accept the layers: {nanoda.get('status')!r}")
     attribution = m.get("attribution")
     if attribution is None:
         problems.append("the manifest has no attribution")
@@ -94,6 +97,12 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         f"{f['statement_stubs']:,} theorems stand as axioms of their type, {f['kept_with_value']:,} are kept with their proof, {f['same_with_value'] + f['same_without_value']:,} definitions and other declarations agree, "
         f"{f['refused_and_stubbed']:,} were stubbed after a refusal; problems: {f['problems'] or 'none'}. The hash is Lean's 32 bits: a difference is certain, an agreement makes one very unlikely and is not a proof;",
     ]
+    nanoda = checks.get("nanoda")
+    if nanoda:
+        lines.append(
+            f"- **an independent kernel** (nanoda, which shares no code with Lean) accepted the layers read back out of their `.olean` files and exported again: {nanoda['declarations']:,} declarations. "
+            "A theorem stands as an axiom of its type there, so what it checks is every other declaration (the definitions, the inductive types, Lean core's) given those statements;"
+        )
     if ext:
         lines.append(
             f"- extension entries put back in {ext['layers']} layers: {ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, "
@@ -105,7 +114,9 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         )
     lines += [
         "",
-        "**What was not checked.** An independent kernel over the layers; a prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
+        "**What was not checked.** "
+        + ("" if nanoda else "An independent kernel over the layers; ")
+        + "a prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
         "",
         "**Made from.** " + ", ".join(f"{k} `{v}`" for k, v in sorted(pins.items())) + f" (workflow run {run}).",
         "",

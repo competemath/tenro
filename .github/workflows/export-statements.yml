@@ -67,6 +67,10 @@ on:
         description: "With the extension entries (ext_rows of the export): register the instances as SCOPED to the namespace of each layer's module (tengai-replay --scoped-instances; a session opens the namespace of the layers it wants active: invariant I4, visible but not active) instead of global (active as soon as the layer is imported, as in the transplant flavor). true or false"
         required: true
         default: "false"
+      nanoda:
+        description: "With layers_replay: read the replayed layers back out of their .olean files, export them again (lean4export without our patch) and check them with nanoda, an independent kernel that shares no code with Lean (invariant I1). A theorem stands as an axiom of its type in a statements snapshot, so it checks every other declaration. true or false"
+        required: true
+        default: "false"
       sample_mode:
         description: "manifests (the theorems of the intake manifests, tools/promote/pick.py) or tree (every theorem of the whole tree, topics by module path: Seed/<area> and Intake/<library>, a tree for layers.py; no names file, the whole tree is exported)"
         required: true
@@ -103,6 +107,7 @@ env:
   SOURCE_HASHES: ${{ inputs.source_hashes }}
   EXT_ROWS: ${{ inputs.ext_rows }}
   SCOPED_INSTANCES: ${{ inputs.scoped_instances }}
+  NANODA: ${{ inputs.nanoda }}
   SAMPLE_MODE: ${{ inputs.sample_mode }}
   SEED_DEPTH: ${{ inputs.seed_depth }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
@@ -111,6 +116,7 @@ env:
   SAMPLE_SEED: ${{ inputs.sample_seed }}
   TREE: ${{ inputs.tree }}
   LEAN4EXPORT_COMMIT: 483e011449cce37c3f8ad5e2aae434cbb1d2e53c  # pragma: allowlist secret (a commit, not a secret): the commit Tengoku's independent check pins for toolchain v4.34.0-rc2
+  NANODA_COMMIT: 3a2407216ee84a75f9e1aead6803d0578be06ae7  # pragma: allowlist secret (a commit, not a secret): the checker Tengoku's independent check pins (reads export format 3.1)
   GH_TOKEN: ${{ github.token }}
 jobs:
   export:
@@ -392,6 +398,43 @@ jobs:
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/snapshot-hashes-time.txt" | tr -s '\t' ' '
           { echo "### Faithful: the snapshot against Tengoku's environment"; echo; echo '```'; python3 tools/promote/faithful.py "$RUNNER_TEMP/source-hashes.jsonl" "$RUNNER_TEMP/snapshot-hashes.jsonl" --only-in-snapshot --out "$RUNNER_TEMP/faithful.json" || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
           python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/faithful.json"))["passed"] else 1)'
+      - name: "Layers: the replayed layers exported again from their .olean files and checked by nanoda, an independent kernel that shares no code with Lean (invariant I1); a theorem is an axiom of its type here, so it checks every other declaration"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.NANODA == 'true' && env.WIDE_SAMPLE == 'true'
+        timeout-minutes: 120
+        run: |
+          # the exporter WITHOUT our patch and the checker, both from the commits Tengoku's independent check pins: nothing of ours stands between the .olean files and the checker
+          git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export-plain"
+          git -C "$RUNNER_TEMP/lean4export-plain" checkout -q "$LEAN4EXPORT_COMMIT"
+          (cd "$RUNNER_TEMP/lean4export-plain" && lake build 2>&1 | tail -2)
+          git clone -q https://github.com/ammkrn/nanoda_lib "$RUNNER_TEMP/nanoda"
+          git -C "$RUNNER_TEMP/nanoda" checkout -q "$NANODA_COMMIT"
+          (cd "$RUNNER_TEMP/nanoda" && cargo build --release --locked 2>&1 | tail -2)
+          nanoda="$RUNNER_TEMP/nanoda/target/release/nanoda_bin"
+          # conf EXPORT PERMIT_ALL_AXIOMS AXIOM_IS_AN_ERROR: the configuration of one run (Lean core declares sorryAx and the compiler axioms, as in Tengoku's nightly: nanoda admits them)
+          conf() { printf '{"export_file_path": "%s", "use_stdin": false, "permitted_axioms": ["propext", "Classical.choice", "Quot.sound", "sorryAx", "Lean.ofReduceBool", "Lean.ofReduceNat", "Lean.trustCompiler"], "unsafe_permit_all_axioms": %s, "unpermitted_axiom_hard_error": %s, "num_threads": 4, "nat_extension": true, "string_extension": true, "print_success_message": true}\n' "$1" "$2" "$3"; }
+          # the checker works at all: nanoda's own empty export
+          conf "$RUNNER_TEMP/nanoda/test_resources/Empty/export" false true > "$RUNNER_TEMP/nanoda-selftest.json"
+          "$nanoda" "$RUNNER_TEMP/nanoda-selftest.json"
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          export LEAN_PATH="$RUNNER_TEMP/layered:$core_path"
+          mapfile -t mods < <(cut -d' ' -f1 "$RUNNER_TEMP/layer-order.txt")
+          # every layer imported: the export holds Lean core and all the layers, so a topic's references into the foundation are checked against the foundation as the .olean files hold it
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export-plain/.lake/build/bin/lean4export" "${mods[@]}" > "$RUNNER_TEMP/layered.ndjson" 2> "$RUNNER_TEMP/layered-export-time.txt" || { tail -20 "$RUNNER_TEMP/layered-export-time.txt"; exit 1; }
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/layered-export-time.txt" | tr -s '\t' ' '
+          wc -lc "$RUNNER_TEMP/layered.ndjson"
+          cd "$GITHUB_WORKSPACE"
+          # a control: with every axiom an error the checker must STOP on the statements that stand as axioms: if it passes, it did not read what this step exports
+          conf "$RUNNER_TEMP/layered.ndjson" false true > "$RUNNER_TEMP/nanoda-control.json"
+          if "$nanoda" "$RUNNER_TEMP/nanoda-control.json" > "$RUNNER_TEMP/nanoda-control.out" 2>&1; then echo "::error::the control passed: nanoda found no unpermitted axiom in an export that is full of them"; exit 1; fi
+          echo "control: nanoda stops on the statements that stand as axioms ($(grep -ciE 'axiom' "$RUNNER_TEMP/nanoda-control.out" || true) lines mention one)"
+          conf "$RUNNER_TEMP/layered.ndjson" true false > "$RUNNER_TEMP/nanoda-layers.json"
+          if /usr/bin/time -v "$nanoda" "$RUNNER_TEMP/nanoda-layers.json" > "$RUNNER_TEMP/nanoda-layers.out" 2> "$RUNNER_TEMP/nanoda-layers-time.txt"; then echo ok > "$RUNNER_TEMP/nanoda-layers.status"; else echo FAILED > "$RUNNER_TEMP/nanoda-layers.status"; fi
+          checked="$(grep -E 'Checked [0-9]+ declarations with no errors' "$RUNNER_TEMP/nanoda-layers.out" | tail -1 || true)"
+          echo "the replayed layers, independent check (nanoda): $(cat "$RUNNER_TEMP/nanoda-layers.status"); ${checked:-no success line}" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-layers-time.txt" | tr -s '\t' ' ' || true
+          if [ "$(cat "$RUNNER_TEMP/nanoda-layers.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-layers-time.txt"; exit 1; fi
+          rm -f "$RUNNER_TEMP/layered.ndjson"
       - name: "The snapshot: the layers index, the manifest, one tar compressed with zstd, verified, and imported from its unpacked copy"
         if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
         run: |
@@ -477,6 +520,8 @@ jobs:
             ${{ runner.temp }}/pack.json
             ${{ runner.temp }}/verify.json
             ${{ runner.temp }}/faithful.json
+            ${{ runner.temp }}/nanoda-layers.out
+            ${{ runner.temp }}/nanoda-layers-time.txt
           retention-days: 30
           compression-level: 0   # the snapshot is already compressed (zstd)
           if-no-files-found: error
