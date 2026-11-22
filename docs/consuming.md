@@ -59,6 +59,24 @@ Not carried: the simp set and every other attribute table (`ext`, `norm_cast`, `
 
 Read from the wide layered run (4,778 theorems of 16 libraries, 17 layers, tenro run 44937592081, the numbers of `docs/transplant.md`): the foundation is 500 MB of `.olean`; a session (the foundation and one topic) loads 512 to 904 MB, and the cold import costs +0.043 to +0.072 s over `import Init` (paired medians of 9 rounds, an empty module about 0.21 s); all 17 layers together are 1,626 MB and cost +0.107 s. The cap `C_load` is 0.25 s (`perf-budget.toml`); no session is over it. The same sample measured up to +0.083 s in an earlier run: the runner's noise is about 0.01 s. The snapshot (manifest, 17 layers) is 536 MB packed with zstd -12.
 
+## The statements snapshot (theorems as axioms of their type)
+
+The `export-statements` workflow (`export_run`, `layers_replay`, `pack`; docs/statements.md) builds the same kind of snapshot from the **statements flavor**: every theorem stands as an axiom of its type (its proof is not in it, except the proofs a definition computes through), so that **all the intake** is a base a session can search and apply against, not a proof library. The artifact is `statements-snapshot-<run id>` (30 days), not a release; the first is run 45000625394 (Tengoku at `1d727eb`, 311,773 theorems of 228 libraries, 635,796 constants).
+
+```
+manifest.json                    schema 2, flavor "statements": pins, every layer (imports, units, constants, olean size and sha256), what was checked; it lists no theorems
+TengaiData/Foundation.olean      what two libraries or more need (78,464 constants)
+TengaiData/Topic/<Library>.olean the statements of one library and what only it needs; imports the foundation
+indexes/layers.jsonl             {"name", "library", "layer"}: the layer that holds each theorem's statement
+indexes/layers-stats.json        the counts and the sha256 of layers.jsonl
+```
+
+Verify and unpack as above (`pack.py verify`: the 229 layers and the two index files are checked against the manifest). To work on a theorem, look its name up in `indexes/layers.jsonl` and `import` that layer (it imports the foundation): the session loads the foundation and that library, +0.013 s in the middle and **+0.038 s at most** over an empty module (229 sessions measured, paired medians; the cap is 0.25 s); the foundation and the four largest libraries together are +0.099 s, all 229 layers +0.210 s. The archive is 648 MB (`zstd -19 --long=27`), 3.9 GB unpacked.
+
+**What it is for, and not.** A session on it is for search and for applying statements (invariant I1: untrusted search, trusted checking): a theorem there has no proof, so `#print axioms` of anything that uses one lists the theorem itself, and a result found there is **checked in an environment that has the real proofs** (Tengoku's, or a proofs snapshot of the same theorems), never accepted from here. What a definition computes through is kept with its proof (the rule of docs/statements.md): that is why every definition replayed, not a promise about tactics. It carries the constants and **no extension entries** (the statements pipeline does not read instances, reducibility, classes or projection information out of Tengoku yet, as the proofs snapshot's `--ext` does), no simp set and no tactic: instance synthesis finds only what Lean core holds, and the next section says what else is missing.
+
+**What was checked, and what was not.** The kernel accepted every declaration of every layer (0 refused of 612,257), the manifest's hashes verify, the layers index places 311,773 of 311,773 theorems, and a session from the unpacked copy imported eight layers and `#check`ed 24 theorems. Not checked yet: that each statement is Tengoku's (the comparison by `tengai-typeinfo --hashes` is the next change), an independent kernel over the layers, and a prover on it. It holds the statements the intake's statements reach, not the seed's other lemmas (about 650,000 theorem statements): see docs/statements.md, "What it does not say, yet".
+
 ## Not verified
 
 - A prover loop on a snapshot: Leak II (Pantograph over `LEAN_PATH`) and Leak IV (`lake serve`) have not been run on one. The environment fits their model (a prebuilt directory on `LEAN_PATH`, nothing built at request time); it has not been tried.
