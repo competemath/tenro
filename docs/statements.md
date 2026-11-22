@@ -31,6 +31,25 @@ The same question for Lean core alone, from the exports themselves (workflow `ex
 
 **The exporter shares terms up to binder names and binder info.** `lean4export` writes a term once, with the binder names and annotations of the first alpha-equivalent term it met (Lean's `Expr.eqv` ignores both), so which names a declaration carries depends on what was visited before it, and leaving the proofs out changes that. The first comparison of the two `Init` exports, which treated names and info as part of a term, reported 3,215 changed declarations for that reason alone; `compare_exports.py` now compares terms up to them and counts the declarations that differ only so (`binder_names_only`). A replay restores the names and annotations of the source from Tengoku's environment (`bi` rows), so the replayed statements are the source's.
 
+### The exports themselves, and a replay (the rule of v2: theorems a definition's value mentions are kept with their proofs)
+
+| | the wide sample (4,800 roots, 16 libraries) | all of the intake (311,857 roots, 31,407 modules) |
+|---|---:|---:|
+| the export with proofs (the snapshot's) | 44.8 M lines, 2.45 GB | not made |
+| theorems as axioms only (v1) | 2.43 M lines, 134 MB | not made |
+| **v2**: lines / bytes / zstd -3 | **5.38 M / 292 MB / 48 MB** | **55.0 M / 3.10 GB / 511 MB** |
+| v2: terms, names | 5.03 M, 285 k | 51.7 M, 2.67 M |
+| v2: axioms, definitions, inductive groups, theorems kept | 15,484, 20,791, 2,011, 20,134 | 351,092, 140,002, 8,034, 118,154 |
+| theorems kept in the whole imported environment | 106,089 | 210,432 |
+| the exporter: time, peak memory | 57 s, 8.3 GB | 12.5 min, 12.5 GB |
+| replay of it (the sample on core v0.0.16, the intake on v0.0.17 with `--stub-refused`; nothing refused in either): time, peak memory | 1 min 59 s, 1.64 GB | **37 min 25 s, 14.3 GB** (612,257 constants added, 5,150 skipped because core holds them, 7,789 inductive groups, 0 refused) |
+| the module it builds | **237 MB** (the proofs flavor: 1,626 MB), 55,316 constants | **3.66 GB**, 612,257 constants |
+| cold import over an empty module (median of 7) | **+0.007 s** (the proofs flavor: +0.138 s) | **+0.30 s** (0.535 s against 0.233 s) |
+
+The rule costs size (the first version, theorems as axioms only, was 147 MB for the sample, which the kernel then refused at `Rat.instEncodable`): 1.6 times the module, and the exporter's memory is the limit of the approach on a 16 GB runner (12.5 GB for the intake; the whole `Tengoku.All` with this rule would not fit, hence waves: the seed first, the intake on top of it). The replay is near the same limit: 14.3 GB of the runner's 16, in 37 minutes.
+
+**One module of all the intake is over the cap.** The cold-load cap `C_load` is 0.25 s (`perf-budget.toml`, lowered only) and the whole intake as one module costs 0.30 s over an empty session (run 44991509898; minimum to minimum, 0.2305 s to 0.5264 s: +0.296 s). The cost does not grow with the number of constants: 11 times the constants (55,316 to 612,257) and 15 times the bytes cost 44 times the import time (0.125 µs a constant for the sample, 0.49 µs for the intake), so the cap cannot be read off the sample, only measured on what a session loads. The remedy is the one the proofs flavor already uses: a foundation and one layer per library (`tools/promote/layers.py`, `tengai-replay --import` and `--only`), so that a session loads the foundation and its own topic. How large the foundation is, constants used by two libraries or more, is the next number; if it is itself near the cap, one foundation is not enough.
+
 ## What the first replay of the whole tree refused, and the rule it taught
 
 The whole tree exported as statements (69,255,348 lines, 4.10 GB; workflow `export-statements`, run 44952755442) was refused by the kernel at `Rat.instEncodable`. A minimal export of that one constant, both ways (`statements-repro`, run 44957656258, `Tengoku.Seed.Data.Rat.Encodable`), reproduces it: the two exports agree on every declaration (the stub's type is the theorem's, up to binder names), the full export replays, the statements export is refused. Read from the exports themselves:
@@ -44,5 +63,5 @@ A theorem stood as an axiom can be typed against, rewritten with and applied; it
 
 * **Coverage.** That closure holds what the 4,778 *statements* reach. A base also needs the lemmas of the seed (Mathlib) that no promoted statement mentions: the whole tree has to be exported as statements (the workflow's job), not a sample.
 * **Statement ids.** `tengoku-isnad` reads theorems; a statements module has axioms. The comparison with Tengoku's ids needs either an isnad option for axioms (a Tengoku change) or a comparison of types from the exports.
-* **Replay.** A definition whose body needs the kernel to unfold a theorem (a reduction through a well-foundedness proof) would not replay with that theorem as an axiom: it fails loudly, and the theorem would have to be kept. How many there are is not known.
+* **Replay.** A definition whose body needs the kernel to unfold a theorem (a reduction through a well-foundedness proof) does not replay with that theorem as an axiom: it fails loudly, or, with `--stub-refused`, stands as an axiom of its type and is listed. With the rule of v2 none of the 612,257 constants of the intake export was refused (run 44991509898: the probe printed "0 declarations were refused by the kernel"). The seed's other lemmas, the part of the whole tree that no intake statement reaches, have not been replayed.
 * **Proving.** Nothing here says a prover does as well in a statements environment; that is a hypothesis for a campaign.
