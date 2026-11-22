@@ -84,3 +84,19 @@ def test_the_extension_input_defaults_to_nothing_changed():
     data = yaml.safe_load(WORKFLOW.read_text())
     triggers = data.get("on") or data.get(True)
     assert triggers["workflow_dispatch"]["inputs"]["ext_rows"]["default"] == "false"
+
+
+def test_scoped_instances_are_asked_for_only_with_the_extension_entries_only_when_the_input_says_so_and_the_manifest_pins_it():
+    data = yaml.safe_load(WORKFLOW.read_text())
+    triggers = data.get("on") or data.get(True)
+    assert triggers["workflow_dispatch"]["inputs"]["scoped_instances"]["default"] == "false"
+    replays = [r for _, r in runs() if '--stub-refused "${args[@]}"' in r and "--tables" in r]
+    assert len(replays) == 1
+    run = replays[0]
+    assert run.count("--scoped-instances") == 1
+    block = run[run.index('if [ -s "$RUNNER_TEMP/ext/$module.ext.jsonl" ]; then') :]
+    block = block[: block.index("fi\n", block.index("--scoped-instances")) + 2]
+    assert '--ext "$RUNNER_TEMP/ext/$module.ext.jsonl"' in block and '[ "$SCOPED_INSTANCES" = true ]' in block, block
+    assert any('--pin "scoped_instances=${SCOPED_INSTANCES:-false}"' in r for _, r in runs()), (
+        "the manifest says which mode the instances were registered in"
+    )
