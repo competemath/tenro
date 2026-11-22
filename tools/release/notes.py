@@ -36,6 +36,15 @@ def gates(m: dict) -> list[str]:
     ext = checks.get("extensions")
     if ext is not None and not ext.get("ok"):
         problems.append(f"Lean refused {ext.get('failed')} extension entries the snapshot was to carry")
+    legal = m.get("legal")
+    if legal is None:
+        problems.append(
+            "the snapshot carries no licence texts (legal/): MIT and Apache-2.0 want the licence and the notices to travel with copies"
+        )
+    elif legal.get("problems") is None or legal["problems"]:
+        problems.append(
+            f"{legal.get('problems') if legal.get('problems') is not None else 'an unknown number of'} sources without a licence text that stands behind the registry's licence (legal/LICENSES/INDEX.json says which)"
+        )
     nanoda = checks.get("nanoda")
     if nanoda is not None and nanoda.get("status") != "ok":
         problems.append(f"the independent kernel (nanoda) did not accept the layers: {nanoda.get('status')!r}")
@@ -47,7 +56,7 @@ def gates(m: dict) -> list[str]:
     return problems
 
 
-def attribution_md(att: dict, tag: str) -> str:
+def attribution_md(att: dict, tag: str | None) -> str:
     rows = []
     for key, lib in sorted(att["libraries"].items()):
         for s in lib["sources"]:
@@ -56,8 +65,8 @@ def attribution_md(att: dict, tag: str) -> str:
             )
     licences = ", ".join(f"{k}: {v}" for k, v in sorted(att["licences"].items()))
     return (
-        f"# Where the content of `{tag}` comes from\n\n"
-        "The statements and definitions in this snapshot are taken, through [Tengoku](https://github.com/competemath/tengoku), from the libraries below, each at the commit shown. "
+        (f"# Where the content of `{tag}` comes from\n\n" if tag else "# Where the content of this snapshot comes from\n\n")
+        + "The statements and definitions in this snapshot are taken, through [Tengoku](https://github.com/competemath/tengoku), from the libraries below, each at the commit shown. "
         "Each library is under the licence shown; the licence and the notices of the library apply to its content, and the credit is the library's authors'. "
         "The tools of Tenro and Tengai that built the snapshot are Apache-2.0.\n\n"
         f"Libraries per licence: {licences}.\n\n"
@@ -128,7 +137,8 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         "```",
         "`indexes/layers.jsonl` in the archive says which layer holds each theorem. docs/consuming.md of Tenro says the rest.",
         "",
-        f"**Where the content comes from.** {len(att['libraries'])} libraries, each at a commit and under a licence ({', '.join(f'{k}: {v}' for k, v in sorted(att['licences'].items()))}): see `ATTRIBUTION.md`.",
+        f"**Where the content comes from.** {len(att['libraries'])} libraries, each at a commit and under a licence ({', '.join(f'{k}: {v}' for k, v in sorted(att['licences'].items()))}): see `ATTRIBUTION.md`. "
+        f"Each library's licence text and notices, as its repository holds them at that commit ({m['legal']['licence_files']:,} files of {m['legal']['sources']:,} repositories), are in the archive under `legal/LICENSES/`, and they apply to its content.",
         "",
         f"Layers: {len(layers)}. Archive sha256 `{archive_sha256}`.",
     ]

@@ -2,6 +2,7 @@
 """pack.py - the tengai data snapshot as one verifiable file, and the way back. Standard library only.
 
   pack.py pack --olean-dir DIR --manifest MANIFEST.json --out SNAPSHOT.tar        DIR/TengaiData/*.olean + manifest.json -> a deterministic tar (sorted, mtime 0, owner 0): the same inputs give the same bytes
+       [--indexes DIR] [--legal DIR]                                                the retrieval indexes go under indexes/, the licence texts and notices (tools/release/licences.py) under legal/: each is listed in the manifest with its sha256 and verified
   pack.py verify SNAPSHOT.tar[.zst|.gz] [--sha256 H] --into DIR                    unpack, check every .olean against the manifest's sha256, print the LEAN_PATH entry that makes `import TengaiData.X` work
 
 A snapshot (manifest schema 1: one module; schema 2: a promotion in layers, `manifest.py layers`) is what a prover environment (Leak) puts on its LEAN_PATH next to Lean core: `LEAN_PATH=DIR:$LEAN_PATH`. Compression is the caller's (`zstd -T0 -19 --long SNAPSHOT.tar`); verify reads .tar, .tar.zst (the `zstd`
@@ -40,10 +41,16 @@ def collect(olean_dir: Path) -> list[tuple[str, Path]]:
     return out
 
 
-def pack(olean_dir: Path, manifest: Path, out: Path, indexes: Path | None = None) -> dict:
+def pack(olean_dir: Path, manifest: Path, out: Path, indexes: Path | None = None, legal: Path | None = None) -> dict:
     files = collect(olean_dir)
     m = json.loads(manifest.read_text(encoding="utf-8"))
     extra = [(f"indexes/{p.name}", p.read_bytes()) for p in sorted(indexes.iterdir()) if p.is_file()] if indexes is not None else []
+    # the licence texts and notices (tools/release/licences.py) travel inside the archive: a copy of the snapshot is a copy with them
+    extra += (
+        [(f"legal/{p.relative_to(legal).as_posix()}", p.read_bytes()) for p in sorted(legal.rglob("*")) if p.is_file()]
+        if legal is not None
+        else []
+    )
     entries = [("manifest.json", manifest.read_bytes()), *[(name, p.read_bytes()) for name, p in files], *extra]
     with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as tar:
         for name, data in entries:
@@ -102,6 +109,21 @@ def verify_indexes(manifest: dict, into: Path) -> None:
             raise SystemExit(f"verify: the index {name} differs from the manifest ({got['sha256'][:12]} vs {rec['sha256'][:12]})")
 
 
+def verify_legal(manifest: dict, into: Path) -> None:
+    """the licence texts the manifest lists (`legal`): exactly those files are under `legal/`, each with the size and the sha256 the manifest recorded; a manifest without `legal` has none"""
+    listed = (manifest.get("legal") or {}).get("files") or {}
+    folder = into / "legal"
+    have = {p.relative_to(folder).as_posix(): p for p in sorted(folder.rglob("*")) if p.is_file()} if folder.is_dir() else {}
+    if set(have) != set(listed):
+        raise SystemExit(
+            f"verify: the snapshot and the manifest list other legal files: missing {sorted(set(listed) - set(have))}, not in the manifest {sorted(set(have) - set(listed))}"
+        )
+    for name, rec in listed.items():
+        got = {"bytes": have[name].stat().st_size, "sha256": sha256_file(have[name])}
+        if got["bytes"] != rec["bytes"] or got["sha256"] != rec["sha256"]:
+            raise SystemExit(f"verify: the legal file {name} differs from the manifest ({got['sha256'][:12]} vs {rec['sha256'][:12]})")
+
+
 def verify(snapshot: Path, into: Path, sha256: str | None = None) -> dict:
     if sha256 is not None and sha256_file(snapshot) != sha256:
         raise SystemExit(f"verify: {snapshot.name} does not have the sha256 {sha256}")
@@ -120,6 +142,7 @@ def verify(snapshot: Path, into: Path, sha256: str | None = None) -> dict:
     if manifest.get("schema") == 2:
         verify_layers(manifest, into, oleans)
         verify_indexes(manifest, into)
+        verify_legal(manifest, into)
     else:
         recorded = (manifest.get("artifact") or {}).get("olean")
         if recorded is None:
@@ -146,13 +169,27 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--manifest", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--indexes", help="a directory of retrieval indexes: its files go into the archive under indexes/")
+    p.add_argument(
+        "--legal", help="a directory of licence texts and notices (tools/release/licences.py): its files go into the archive under legal/"
+    )
     v = sub.add_parser("verify")
     v.add_argument("snapshot")
     v.add_argument("--sha256")
     v.add_argument("--into", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "pack":
-        print(json.dumps(pack(Path(a.olean_dir), Path(a.manifest), Path(a.out), Path(a.indexes) if a.indexes else None), sort_keys=True))
+        print(
+            json.dumps(
+                pack(
+                    Path(a.olean_dir),
+                    Path(a.manifest),
+                    Path(a.out),
+                    Path(a.indexes) if a.indexes else None,
+                    Path(a.legal) if a.legal else None,
+                ),
+                sort_keys=True,
+            )
+        )
     else:
         print(json.dumps(verify(Path(a.snapshot), Path(a.into), a.sha256), sort_keys=True))
     return 0

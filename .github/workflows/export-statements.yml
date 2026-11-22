@@ -435,6 +435,12 @@ jobs:
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/nanoda-layers-time.txt" | tr -s '\t' ' ' || true
           if [ "$(cat "$RUNNER_TEMP/nanoda-layers.status")" != ok ]; then echo "--- nanoda stderr (the reason) ---"; head -60 "$RUNNER_TEMP/nanoda-layers-time.txt"; exit 1; fi
           rm -f "$RUNNER_TEMP/layered.ndjson"
+      - name: "The licence texts and notices of every library, as its repository holds them at the commit the snapshot took it from (they travel inside the archive, under legal/)"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
+        continue-on-error: true   # a network call: if it fails the snapshot is packed without them, and the release gate (tools/release/notes.py) refuses a snapshot that carries none
+        run: |
+          [ -s "$RUNNER_TEMP/attribution.json" ] || { echo "::warning::no attribution.json (an export run with layers=true makes it): no licence texts"; exit 1; }
+          python3 tools/release/licences.py "$RUNNER_TEMP/attribution.json" --out "$RUNNER_TEMP/legal" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The snapshot: the layers index, the manifest, one tar compressed with zstd, verified, and imported from its unpacked copy"
         if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
         run: |
@@ -455,10 +461,11 @@ jobs:
           tengai_tag="$(python3 -c 'import json; print(json.load(open("core.lock"))["tag"])')"
           echo "pins: tenro $src_sha, Tengoku $tengoku_pin, exporter patch $patch_sha, tengai $tengai_tag"
           python3 tools/promote/layer_index.py --layers "$RUNNER_TEMP/layers" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/indexes" | tee -a "$GITHUB_STEP_SUMMARY"
-          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "scoped_instances=${SCOPED_INSTANCES:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
+          legal_args=(); if [ -s "$RUNNER_TEMP/legal/LICENSES/INDEX.json" ]; then legal_args=(--legal "$RUNNER_TEMP/legal"); fi
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" "${legal_args[@]}" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "scoped_instances=${SCOPED_INSTANCES:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
           # the export and the parsed tables are not needed any more (the runner's disk)
           rm -f "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/tables.olean"
-          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
+          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" "${legal_args[@]}" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
           /usr/bin/time -v zstd -T0 -19 --long=27 -q "$RUNNER_TEMP/snapshot.tar" -o "$RUNNER_TEMP/snapshot.tar.zst" 2> "$RUNNER_TEMP/zstd-time.txt"
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/zstd-time.txt" | tr -s '\t' ' '
           tar_bytes="$(stat -c %s "$RUNNER_TEMP/snapshot.tar")"

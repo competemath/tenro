@@ -149,3 +149,22 @@ def test_the_independent_kernel_input_defaults_to_nothing_changed():
     assert triggers["workflow_dispatch"]["inputs"]["nanoda"]["default"] == "false"
     step = next(s for s in JOB if "nanoda_bin" in s.get("run", "") and "nanoda-layers" in s["run"])
     assert "env.NANODA == 'true'" in step["if"] and "env.LAYERS_REPLAY == 'true'" in step["if"]
+
+
+def test_the_licence_texts_are_fetched_in_a_step_that_may_fail_and_the_snapshot_is_then_packed_without_them():
+    steps = [s for s in JOB if "licences.py" in s.get("run", "")]
+    assert len(steps) == 1
+    assert steps[0].get("continue-on-error") is True, (
+        "a network call must not take the snapshot down with it: the release gate refuses a snapshot without them"
+    )
+    assert 'attribution.json" --out "$RUNNER_TEMP/legal"' in steps[0]["run"]
+    assert (WORKFLOW.parent.parent.parent / "tools" / "release" / "licences.py").is_file()
+
+
+def test_the_manifest_and_the_archive_both_take_the_licence_texts_when_there_are_some():
+    snapshot = [r for _, r in runs() if "manifest.py layers" in r and "pack.py pack" in r]
+    assert len(snapshot) == 1
+    run = snapshot[0]
+    assert 'legal_args=(--legal "$RUNNER_TEMP/legal")' in run and "LICENSES/INDEX.json" in run, "only when the writer left its index"
+    for line in (ln for ln in run.splitlines() if "manifest.py layers" in ln or "pack.py pack" in ln):
+        assert '"${legal_args[@]}"' in line, line[:100]
