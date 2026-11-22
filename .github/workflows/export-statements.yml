@@ -59,6 +59,18 @@ on:
         description: "In a run that exports (no export_run) with layers: also read, in Tengoku's environment, the hashes of the first constant of every unit of the layers (tengai-typeinfo --hashes) and keep them with the export, for the faithfulness check of a later replay. true or false"
         required: true
         default: "false"
+      sample_mode:
+        description: "manifests (the theorems of the intake manifests, tools/promote/pick.py) or tree (every theorem of the whole tree, topics by module path: Seed/<area> and Intake/<library>, a tree for layers.py; no names file, the whole tree is exported)"
+        required: true
+        default: "manifests"
+      seed_depth:
+        description: "With sample_mode=tree: how many components below Tengoku.Seed make a topic (1: an area of the seed, 2: Seed/Algebra/Group)"
+        required: true
+        default: "1"
+      drop_proofs:
+        description: "Export the theorems as axioms of their type and keep NO proof (lean4export --drop-proofs, the first version of --statements): a much smaller export; a definition that only computes through a proof is refused by the kernel at replay and stands as an axiom of its type (--stub-refused), and is counted. true or false"
+        required: true
+        default: "false"
       pack:
         description: "With layers_replay and all the topics replayed: the layers index, the manifest (flavor statements), one tar compressed with zstd, verified and imported from its unpacked copy, kept as an artifact. true or false"
         required: true
@@ -79,7 +91,10 @@ env:
   LAYERS_REPLAY: ${{ inputs.layers_replay }}
   TOPICS_MEASURED: ${{ inputs.topics_measured }}
   PACK: ${{ inputs.pack }}
+  DROP_PROOFS: ${{ inputs.drop_proofs }}
   SOURCE_HASHES: ${{ inputs.source_hashes }}
+  SAMPLE_MODE: ${{ inputs.sample_mode }}
+  SEED_DEPTH: ${{ inputs.seed_depth }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -149,6 +164,9 @@ jobs:
           [[ "$EXPORT_RUN" =~ ^[0-9]+$ ]] || { echo "bad export_run"; exit 1; }
           gh run download "$EXPORT_RUN" --repo "$GITHUB_REPOSITORY" --name "statements-export-$EXPORT_RUN" --dir "$RUNNER_TEMP/kept"
           ls -l "$RUNNER_TEMP/kept"
+          # the manifest says how the export was made, so this run must say the same as the export did (an export made before the flag existed kept its proofs)
+          made="$(cat "$RUNNER_TEMP/kept/drop-proofs.txt" 2>/dev/null || echo false)"
+          [ "$made" = "${DROP_PROOFS:-false}" ] || { echo "::error::the export of run $EXPORT_RUN was made with drop_proofs=$made, this run says drop_proofs=${DROP_PROOFS:-false}"; exit 1; }
           zstd -d -q "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst" -o "$RUNNER_TEMP/sample-stmt.ndjson"
           for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json; do
             if [ -f "$RUNNER_TEMP/kept/$f" ]; then cp "$RUNNER_TEMP/kept/$f" "$RUNNER_TEMP/$f"; fi
@@ -158,22 +176,38 @@ jobs:
           ls -l "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/topics.json"
           { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $(wc -l < "$RUNNER_TEMP/names.txt") names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample as statements (by default the wide sample of the transplant runs): the same roots, theorems as axioms unless a definition's value mentions them"
-        if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
+        if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == '' && env.SAMPLE_MODE != 'tree'
         run: |
           [[ "$SAMPLE_COUNT" =~ ^[0-9]+$ ]] || { echo "bad count"; exit 1; }
           for l in $SAMPLE_LIBS; do [[ "$l" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad library $l"; exit 1; }; done
           python3 tools/promote/pick.py --manifests .tengoku/data/intake --libraries "$SAMPLE_LIBS" --n "$SAMPLE_COUNT" --seed "$SAMPLE_SEED" --names "$RUNNER_TEMP/names.txt" --modules "$RUNNER_TEMP/export-modules.txt" --sample "$RUNNER_TEMP/sample.jsonl"
           wc -l "$RUNNER_TEMP/names.txt" "$RUNNER_TEMP/export-modules.txt"
           mapfile -t mods < "$RUNNER_TEMP/export-modules.txt"
+          drop=(); if [ "$DROP_PROOFS" = true ]; then drop=(--drop-proofs); fi
           cd .tengoku
           # a sampled name that is not a constant of the tree is a PANIC line on stderr and the export goes on without it (22 of the 4,800); the names come from a file (hundreds of thousands do not fit on a command line)
-          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements --names-file="$RUNNER_TEMP/names.txt" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements "${drop[@]}" --names-file="$RUNNER_TEMP/names.txt" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
           grep -E "^lean4export --statements: " "$RUNNER_TEMP/sample-stmt.err" | tee -a "$GITHUB_STEP_SUMMARY" || true
           echo "PANIC lines: $(grep -cE '^PANIC' "$RUNNER_TEMP/sample-stmt.err" || true)"
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The sample as statements ($(wc -l < "$RUNNER_TEMP/names.txt") theorems of $SAMPLE_LIBS, seed $SAMPLE_SEED)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "The whole tree as the sample (sample_mode=tree): the theorems of every module, the topics by module path, and the tree exported as statements"
+        if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == '' && env.SAMPLE_MODE == 'tree'
+        run: |
+          [[ "$SEED_DEPTH" =~ ^[1-9]$ ]] || { echo "bad seed_depth"; exit 1; }
+          (cd .tengoku && lake env lean --run "$GITHUB_WORKSPACE/tools/promote/Modules.lean" --prefix Tengoku Tengoku.All) > "$RUNNER_TEMP/modules.jsonl" 2> "$RUNNER_TEMP/modules.err"
+          tail -1 "$RUNNER_TEMP/modules.err"
+          [ -s "$RUNNER_TEMP/modules.jsonl" ] || { echo "no theorem listed"; exit 1; }
+          python3 tools/promote/tree_topics.py "$RUNNER_TEMP/modules.jsonl" --out "$RUNNER_TEMP/topics.json" --sample-out "$RUNNER_TEMP/sample.jsonl" --seed-depth "$SEED_DEPTH" | tee -a "$GITHUB_STEP_SUMMARY"
+          drop=(); if [ "$DROP_PROOFS" = true ]; then drop=(--drop-proofs); fi
+          cd .tengoku
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" Tengoku.All --statements "${drop[@]}" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
+          grep -E "^lean4export --statements: " "$RUNNER_TEMP/sample-stmt.err" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/sample-stmt.err" || true
+          cd "$GITHUB_WORKSPACE"
+          python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The whole tree as statements (sample_mode=tree)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample without the names the exporter did not find, and its topics (the libraries)"
-        if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
+        if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == '' && env.SAMPLE_MODE != 'tree'
         run: |
           python3 tools/promote/missing.py --err "$RUNNER_TEMP/sample-stmt.err" --names "$RUNNER_TEMP/names.txt" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY'
@@ -190,7 +224,9 @@ jobs:
       - name: "Attribution: the repository, commit and licence of each library of the sample"
         if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
-          python3 tools/promote/attribution.py --intake .tengoku/data/intake --sources .tengoku/schemas/sources.json --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          sample_args=(--sample "$RUNNER_TEMP/sample.jsonl")
+          if [ "$SAMPLE_MODE" = tree ]; then sample_args=(); fi   # the topics of a tree are not the libraries' keys: every library of the intake is listed
+          python3 tools/promote/attribution.py --intake .tengoku/data/intake --sources .tengoku/schemas/sources.json "${sample_args[@]}" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
         if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
         continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe
@@ -358,7 +394,7 @@ jobs:
           tengai_tag="$(python3 -c 'import json; print(json.load(open("core.lock"))["tag"])')"
           echo "pins: tenro $src_sha, Tengoku $tengoku_pin, exporter patch $patch_sha, tengai $tengai_tag"
           python3 tools/promote/layer_index.py --layers "$RUNNER_TEMP/layers" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/indexes" | tee -a "$GITHUB_STEP_SUMMARY"
-          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
           # the export and the parsed tables are not needed any more (the runner's disk)
           rm -f "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/tables.olean"
           python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
@@ -445,6 +481,7 @@ jobs:
             if [ -f "$RUNNER_TEMP/$f" ]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/kept/$f"; fi
           done
           if [ -f "$RUNNER_TEMP/source-hashes.jsonl" ]; then zstd -3 -T0 -q "$RUNNER_TEMP/source-hashes.jsonl" -o "$RUNNER_TEMP/kept/source-hashes.jsonl.zst"; fi
+          echo "${DROP_PROOFS:-false}" > "$RUNNER_TEMP/kept/drop-proofs.txt"
           ls -l "$RUNNER_TEMP/kept"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
@@ -459,7 +496,8 @@ jobs:
         working-directory: .tengoku
         run: |
           read -ra mods <<< "$MODULES"
-          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements > "$RUNNER_TEMP/tree-stmt.ndjson" 2> "$RUNNER_TEMP/tree-stmt.err" || { head -40 "$RUNNER_TEMP/tree-stmt.err"; exit 1; }
+          drop=(); if [ "$DROP_PROOFS" = true ]; then drop=(--drop-proofs); fi
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${mods[@]}" --statements "${drop[@]}" > "$RUNNER_TEMP/tree-stmt.ndjson" 2> "$RUNNER_TEMP/tree-stmt.err" || { head -40 "$RUNNER_TEMP/tree-stmt.err"; exit 1; }
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/tree-stmt.err" || true
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/tree-stmt.ndjson" --time-log "$RUNNER_TEMP/tree-stmt.err" --label "The whole tree as statements ($MODULES)" --out "$RUNNER_TEMP/tree-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
