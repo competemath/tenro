@@ -53,7 +53,7 @@ What an index cannot do, stated: the intent index finds a statement by its docst
 
 ## What is active in a session, and what is not
 
-Carried (`tengai-replay --ext`, tengai ADR-0005): the constants and their proofs, instances (global), reducibility, classes, projection information, structure information (fields and parents: `p.x` through a parent), and the binder names and annotations of the source.
+Carried (`tengai-replay --ext`, tengai ADR-0005): the constants and their proofs, instances (the global ones global, the scoped ones scoped in their namespaces, so `open scoped X` activates them as in Tengoku: Tengai v0.0.20 on, none before), reducibility, classes, projection information, structure information (fields and parents: `p.x` through a parent), and the binder names and annotations of the source.
 
 Not carried: the simp set and every other attribute table (`ext`, `norm_cast`, `elab_as_elim`, ...), notation, macros, elaborators and tactics (they are code, which a replay does not carry), docstrings, the equation lemmas of recursive definitions, and the flat constructor of a structure unless an export names it (structure instance notation `{ x := 1 }` needs it). So a session has Lean core's tactics only (`omega`, `grind`, `simp` with explicit lemmas, `decide`, `exact?`, `apply`, `rw`, ...), no `ring`, `linarith`, `norm_num` or `positivity`. That is invariant I4 (visible, not active) and a consequence of replay, not an oversight.
 
