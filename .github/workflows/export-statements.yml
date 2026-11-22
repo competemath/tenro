@@ -35,6 +35,10 @@ on:
         description: "After the exports, try the kernel replay of each (tengai-replay from core/) and measure the module: true or false"
         required: true
         default: "true"
+      layers:
+        description: "Plan the layers of the sample (a foundation, the constants more than one library needs, and one layer per library; tools/promote/layers.py): the sizes only, nothing is replayed. true or false"
+        required: true
+        default: "false"
 permissions: {}
 concurrency:
   group: export-statements
@@ -45,6 +49,7 @@ defaults:
 env:
   MODULES: ${{ inputs.modules }}
   REPLAY: ${{ inputs.replay }}
+  LAYERS: ${{ inputs.layers }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -120,6 +125,52 @@ jobs:
           echo "PANIC lines: $(grep -cE '^PANIC' "$RUNNER_TEMP/sample-stmt.err" || true)"
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The sample as statements ($(wc -l < "$RUNNER_TEMP/names.txt") theorems of $SAMPLE_LIBS, seed $SAMPLE_SEED)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
+        if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
+        continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe
+        run: |
+          python3 tools/promote/missing.py --err "$RUNNER_TEMP/sample-stmt.err" --names "$RUNNER_TEMP/names.txt" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 - <<'PY'
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          topics: dict[str, list[str]] = {}
+          for ln in open(f"{t}/sample.jsonl", encoding="utf-8"):
+              if ln.strip():
+                  r = json.loads(ln)
+                  topics.setdefault(r["library"], []).append(r["name"])
+          json.dump(topics, open(f"{t}/topics.json", "w", encoding="utf-8"))
+          print("topics:", len(topics), "libraries,", sum(len(v) for v in topics.values()), "theorems")
+          PY
+          /usr/bin/time -v python3 tools/promote/layers.py "$RUNNER_TEMP/sample-stmt.ndjson" --topics "$RUNNER_TEMP/topics.json" --out "$RUNNER_TEMP/layers" > "$RUNNER_TEMP/layers.out" 2> "$RUNNER_TEMP/layers-time.txt" || { tail -20 "$RUNNER_TEMP/layers-time.txt"; exit 1; }
+          head -1 "$RUNNER_TEMP/layers.out"
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/layers-time.txt" | tr -s '\t' ' '
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          p = json.load(open(f"{t}/layers/layers.json", encoding="utf-8"))
+          tot, layers, topics = p["totals"], p["layers"], p["topics"]
+          found = next((x for x in layers if x["topic"] is None), None)
+          fc = found["constants"] if found else 0
+          own = sorted((x["constants"], x["topic"]) for x in layers if x["topic"] is not None)
+          used = sorted(v["foundation_units_used"] for v in topics.values())
+          def q(xs, f):
+              return xs[min(len(xs) - 1, int(f * len(xs)))] if xs else 0
+          print(f"### Layers of the sample ({len(topics)} libraries as topics)")
+          print()
+          print(f"{tot['units']:,} units, {tot['constants']:,} constants, {tot['terms']:,} terms in all; the units by kind: {tot['kinds']}")
+          if found:
+              print(f"* the foundation (used by two libraries or more): {found['units']:,} units, {fc:,} constants, {found['terms']:,} terms, {100 * fc / tot['constants']:.1f} % of the constants")
+          print(f"* the topic layers (what only one library needs), constants: smallest {own[0][0]:,}, median {q([c for c, _ in own], .5):,}, 90th percentile {q([c for c, _ in own], .9):,}, largest {own[-1][0]:,} ({own[-1][1]}); together {sum(c for c, _ in own):,}")
+          print(f"* a session loads the foundation and its topic: the worst is {fc + own[-1][0]:,} constants, a median one {fc + q([c for c, _ in own], .5):,}")
+          print(f"* what a topic actually uses of the foundation (units): smallest {used[0]:,}, median {q(used, .5):,}, 90th percentile {q(used, .9):,}, largest {used[-1]:,} of {found['units'] if found else 0:,}: a foundation cut into shards could load less than all of it")
+          print("* measured so far, cold import over an empty session: 55,316 constants +0.007 s, 612,257 constants +0.30 s (docs/statements.md); the cap is 0.25 s")
+          print()
+          print("| the largest topic layers | theorems | own units | foundation units used |")
+          print("|---|---:|---:|---:|")
+          for c, name in own[-8:][::-1]:
+              v = topics[name]
+              print(f"| {name} | {v['theorems']:,} | {v['own_units']:,} | {v['foundation_units_used']:,} |")
+          PY
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
         if: env.TREE == 'true'
         working-directory: .tengoku
@@ -174,6 +225,9 @@ jobs:
             ${{ runner.temp }}/tree-stmt-stats.json
             ${{ runner.temp }}/replay-*-stats.json
             ${{ runner.temp }}/refused-*.txt
+            ${{ runner.temp }}/layers/layers.json
+            ${{ runner.temp }}/layers-time.txt
+            ${{ runner.temp }}/missing-names.txt
             ${{ runner.temp }}/replay-*-time.txt
             ${{ runner.temp }}/import-*.json
           retention-days: 30
