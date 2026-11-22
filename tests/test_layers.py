@@ -40,6 +40,122 @@ def names(p: dict, module: str) -> list[str]:
     return [".".join(str(c) for c in n) for n in p["names"][module]]
 
 
+def tree_export() -> Builder:
+    """two areas of a seed and a library: `shared_seed` is needed by both areas, `only_alg` by the algebra area and by the library, `only_ana` by the analysis area alone"""
+    b = Builder()
+    b.decl("axiom", "T", b.sort())
+    t = b.const("T")
+    b.decl("axiom", "base", t)
+    b.decl("thm", "shared_seed", t, b.const("base"))
+    b.decl("thm", "only_alg", t, b.const("base"))
+    b.decl("thm", "only_ana", t, b.const("base"))
+    b.decl("thm", "AlgThm", t, b.app(b.const("shared_seed"), b.const("only_alg")))
+    b.decl("thm", "AnaThm", t, b.app(b.const("shared_seed"), b.const("only_ana")))
+    b.decl("thm", "LibThm", t, b.const("only_alg"))
+    return b
+
+
+TREE = {"Seed/Algebra": ["AlgThm"], "Seed/Analysis": ["AnaThm"], "Intake/lib1": ["LibThm"]}
+
+
+class Tree(unittest.TestCase):
+    def test_a_constant_goes_to_the_lowest_node_that_holds_every_topic_that_needs_it(self):
+        p = run(tree_export(), TREE)
+        self.assertEqual(
+            names(p, "TengaiData.Foundation"), ["T", "base", "only_alg"]
+        )  # the algebra area and the library both need only_alg: no group holds them both
+        self.assertEqual(names(p, "TengaiData.Group.Seed"), ["shared_seed"])  # both areas of the seed need it, nothing outside does
+        self.assertEqual(names(p, "TengaiData.Topic.Seed.Algebra"), ["AlgThm"])
+        self.assertEqual(names(p, "TengaiData.Topic.Seed.Analysis"), ["AnaThm", "only_ana"])
+        self.assertEqual(names(p, "TengaiData.Topic.Intake.Lib1"), ["LibThm"])
+        self.assertNotIn("TengaiData.Group.Intake", p["names"])  # a group no constant belongs to has no layer
+
+    def test_the_layers_are_in_the_order_they_must_be_replayed_in_and_import_every_layer_above_them(self):
+        p = run(tree_export(), TREE)
+        self.assertEqual(
+            [x["module"] for x in p["layers"]],
+            [
+                "TengaiData.Foundation",
+                "TengaiData.Group.Seed",
+                "TengaiData.Topic.Seed.Algebra",
+                "TengaiData.Topic.Seed.Analysis",
+                "TengaiData.Topic.Intake.Lib1",
+            ],
+        )
+        imports = {x["module"]: x["imports"] for x in p["layers"]}
+        self.assertEqual(imports["TengaiData.Foundation"], [])
+        self.assertEqual(imports["TengaiData.Group.Seed"], ["TengaiData.Foundation"])
+        self.assertEqual(imports["TengaiData.Topic.Seed.Algebra"], ["TengaiData.Foundation", "TengaiData.Group.Seed"])
+        self.assertEqual(
+            imports["TengaiData.Topic.Intake.Lib1"], ["TengaiData.Foundation"]
+        )  # the library needs nothing of the seed's group
+        by = {x["module"]: x for x in p["layers"]}
+        self.assertEqual((by["TengaiData.Group.Seed"]["topic"], by["TengaiData.Group.Seed"]["group"]), (None, "Seed"))
+        self.assertEqual(by["TengaiData.Topic.Seed.Algebra"]["topic"], "Seed/Algebra")
+        self.assertNotIn("group", by["TengaiData.Foundation"])
+
+    def test_what_a_session_loads_is_the_foundation_the_groups_above_the_topic_and_the_topic(self):
+        p = run(tree_export(), TREE)
+        alg = p["topics"]["Seed/Algebra"]
+        self.assertEqual(alg["own_units"], 1)  # AlgThm
+        self.assertEqual(alg["foundation_units_used"], 3)  # T, base, only_alg
+        self.assertEqual(alg["group_units_used"], 1)  # shared_seed
+        self.assertEqual(alg["units_loaded"], 5)
+        lib = p["topics"]["Intake/lib1"]
+        self.assertEqual((lib["own_units"], lib["foundation_units_used"], lib["group_units_used"], lib["units_loaded"]), (1, 3, 0, 4))
+
+    def test_a_flat_set_of_topics_is_a_tree_of_one_level_and_has_no_group_statistics(self):
+        p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
+        self.assertNotIn("group_units_used", p["topics"]["alpha"])
+        self.assertTrue(all("group" not in x for x in p["layers"]))
+
+    def test_three_levels(self):
+        b = Builder()
+        b.decl("axiom", "T", b.sort())
+        t = b.const("T")
+        b.decl("thm", "ab_shared", t)  # needed by A/B/C1 and A/B/C2: the group A/B
+        b.decl("thm", "a_shared", t)  # needed by A/B/C1 and A/D/E: the group A
+        b.decl("thm", "C1", t, b.app(b.const("ab_shared"), b.const("a_shared")))
+        b.decl("thm", "C2", t, b.const("ab_shared"))
+        b.decl("thm", "E", t, b.const("a_shared"))
+        b.decl("thm", "Z", t)  # a topic outside the group A: T, the type of every theorem, is needed by topics of two groups
+        p = run(b, {"A/B/C1": ["C1"], "A/B/C2": ["C2"], "A/D/E": ["E"], "Z/z": ["Z"]})
+        self.assertEqual(names(p, "TengaiData.Foundation"), ["T"])
+        self.assertEqual(names(p, "TengaiData.Group.A"), ["a_shared"])
+        self.assertEqual(names(p, "TengaiData.Group.A.B"), ["ab_shared"])
+        self.assertNotIn("TengaiData.Group.A.D", p["names"])
+        imports = {x["module"]: x["imports"] for x in p["layers"]}
+        self.assertEqual(imports["TengaiData.Group.A.B"], ["TengaiData.Foundation", "TengaiData.Group.A"])
+        self.assertEqual(imports["TengaiData.Topic.A.B.C1"], ["TengaiData.Foundation", "TengaiData.Group.A", "TengaiData.Group.A.B"])
+        self.assertEqual(imports["TengaiData.Topic.A.D.E"], ["TengaiData.Foundation", "TengaiData.Group.A"])
+        depth = {x["module"]: i for i, x in enumerate(p["layers"])}
+        for x in p["layers"]:
+            self.assertTrue(all(depth[m] < depth[x["module"]] for m in x["imports"]), x)  # every layer comes after the ones it imports
+
+    def test_a_topic_below_another_topic_is_refused(self):
+        with self.assertRaises(SystemExit):
+            run(tree_export(), {"Seed": ["AlgThm"], "Seed/Analysis": ["AnaThm"]})
+
+    def test_a_layer_never_depends_on_a_layer_that_is_not_above_it(self):
+        p = run(tree_export(), TREE)
+        layer_of = {}
+        for module, ns in p["names"].items():
+            for n in ns:
+                layer_of[".".join(str(c) for c in n)] = module
+        above = {x["module"]: set(x["imports"]) | {x["module"]} for x in p["layers"]}
+        deps = {
+            "shared_seed": ["base"],
+            "only_alg": ["base"],
+            "only_ana": ["base"],
+            "AlgThm": ["shared_seed", "only_alg"],
+            "AnaThm": ["shared_seed", "only_ana"],
+            "LibThm": ["only_alg"],
+        }
+        for n, ds in deps.items():
+            for d in ds:
+                self.assertIn(layer_of[d], above[layer_of[n]], (n, d))
+
+
 class Planning(unittest.TestCase):
     def test_a_constant_two_topics_need_is_in_the_foundation_and_one_topic_needs_is_in_its_layer(self):
         p = run(two_topics(), {"alpha": ["A1"], "beta": ["B1"]})
