@@ -786,9 +786,10 @@ def applyExt (rows : Array Json) (scopedInst : Bool) : MetaM (ExtCounts × Array
           -- what the environment says about the constant (the first run of a whole tree lost 5 instances to `Unknown constant`, one of them the instance itself): is it there, and which constants of its type and value are not
           let env ← getEnv
           let missing (e : Expr) : Array Name := e.getUsedConstants.filter fun k => !env.contains k
+          let flags := s!"kernel.find?={(env.toKernelEnv.find? n).isSome} find?={(env.find? n).isSome} contains={env.contains n} map₂={env.constants.map₂.contains n} map₁={env.constants.map₁.contains n}"
           let facts := match env.find? n with
-            | none => "the instance itself is not in the environment"
-            | some ci => s!"in the environment; its type mentions missing {missing ci.type}; its value mentions missing {(ci.value?.map missing).getD #[]}"
+            | none => s!"the instance itself is not in the environment ({flags})"
+            | some ci => s!"in the environment ({flags}); its type mentions missing {missing ci.type}; its value mentions missing {(ci.value?.map missing).getD #[]}"
           errors := errors.push s!"instance {n}: {← ex.toMessageData.toString} [{facts}]"
   -- the scoped instances, each in the namespace it is scoped in (`addInstance` registers a scoped entry in the current namespace)
   for r in rows do
@@ -903,6 +904,14 @@ def finishModule (replayed : Environment) (st : Stats) (rows : Option (Array Jso
         | .error _ => return some j
       else
         return some j
+    -- DIAG: an instance row whose constant the kernel holds and the Lean-level lookups do not, before any entry is applied
+    for j in rows do
+      if has j "inst" then
+        let n ← nameOfJson (← obj j "n")
+        let k := (replayed.toKernelEnv.find? n).isSome
+        let f := (replayed.find? n).isSome
+        if k != f || !f then
+          IO.eprintln s!"ext: DIAG-START {n}: kernel.find?={k} find?={f} contains={replayed.contains n} map₂={replayed.constants.map₂.contains n} map₁={replayed.constants.map₁.contains n}"
     let ((c, errs), cst) ← ((applyExt rows scopedInst).run' {}).toIO { fileName := "<replay>", fileMap := default } { env := cur }
     for e in errs do IO.eprintln s!"ext: {e}"
     counts := some c

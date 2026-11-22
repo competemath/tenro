@@ -102,6 +102,7 @@ env:
   EXPORT_RUN: ${{ inputs.export_run }}
   LAYERS_REPLAY: ${{ inputs.layers_replay }}
   TOPICS_MEASURED: ${{ inputs.topics_measured }}
+  DIAG_LAYERS: "TengaiData.Topic.TdaLib TengaiData.Topic.NsP23"
   PACK: ${{ inputs.pack }}
   DROP_PROOFS: ${{ inputs.drop_proofs }}
   SOURCE_HASHES: ${{ inputs.source_hashes }}
@@ -298,7 +299,8 @@ jobs:
           found = [x for x in p["layers"] if x["topic"] is None]
           tops = sorted((x for x in p["layers"] if x["topic"] is not None), key=lambda x: (-x["constants"], x["module"]))
           ranks = sorted({round(i * (len(tops) - 1) / max(1, k - 1)) for i in range(k)}) if tops and k > 0 else []
-          for layer in found + [tops[i] for i in ranks]:
+          wanted = os.environ.get("DIAG_LAYERS", "").split()
+          for layer in found + ([x for x in tops if x["module"] in wanted] if wanted else [tops[i] for i in ranks]):
               print(layer["module"], layer["file"], *layer["imports"])
           PY
           cat "$RUNNER_TEMP/layer-order.txt" | cut -d' ' -f1 | tr '\n' ' '; echo
