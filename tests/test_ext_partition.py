@@ -66,6 +66,19 @@ class Partition(unittest.TestCase):
         self.assertEqual(report["layers"][ALPHA]["kinds"], {"proj": 1, "st": 1})
         self.assertEqual(report["kinds"], {"bi": 1, "class": 1, "inst": 1, "proj": 1, "red": 2, "st": 1})
 
+    def test_scoped_instances_are_counted_apart_because_the_replay_registers_them_as_global(self):
+        rows = [
+            row(["instAddNat"], inst={"prio": 1000, "kind": "scoped"}),
+            row(["Add", "mk"], inst={"prio": 1000, "kind": "global"}),
+            row(["foo", 7, "bar"], red="reducible"),
+        ]
+        _, report = E.partition(rows, self.owner)
+        self.assertEqual(report["kinds"]["inst"], 2)
+        self.assertEqual(report["kinds"]["inst_scoped"], 1)
+        self.assertEqual(report["layers"][FOUNDATION]["kinds"]["inst_scoped"], 1)
+        _, none = E.partition([ROWS[0]], self.owner)
+        self.assertNotIn("inst_scoped", none["kinds"])
+
     def test_a_row_of_a_constant_no_layer_holds_is_an_error_not_a_loss(self):
         with self.assertRaises(SystemExit) as c:
             E.partition([ROWS[0], row(["Nowhere", "x"], red="reducible")], self.owner)
