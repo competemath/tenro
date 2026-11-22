@@ -4,7 +4,7 @@
   ext_compare.py SOURCE.jsonl SNAPSHOT.jsonl --instances global|scoped --out REPORT.json
 
 SOURCE.jsonl is what `tengai-extinfo` printed in Tengoku's environment for the constants of the layers, SNAPSHOT.jsonl what the SAME tool printed for the SAME constants in the snapshot's environment (the layers
-imported, after `tengai-replay --ext` put the entries back): one JSON object a line, `{"n": [name components], ...}` with `red`, `proj`, `class`, `st`, `inst` and `bi` for what the constant carries (a constant
+imported, after `tengai-replay --ext` put the entries back): one JSON object a line, `{"n": [name components], ...}` with `red`, `proj`, `class`, `st`, `inst`, `sinst` (the namespaces it is a scoped instance in, with their priorities) and `bi` for what the constant carries (a constant
 that carries nothing has no row). The tool is the same on both sides, so what is compared is what Lean itself says about each constant, not what the replay meant to do.
 
 `--added NAMES.jsonl` (the names the layer replays added, `tengai-replay --added`, one JSON array of components a line) says which constants the snapshot is responsible for: a constant of the layers that
@@ -27,7 +27,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-KINDS = ("red", "proj", "class", "st", "inst", "bi")
+KINDS = ("red", "proj", "class", "st", "inst", "sinst", "bi")
 EXAMPLES = 40
 
 
@@ -46,6 +46,13 @@ def read(path: Path) -> dict[tuple, dict]:
                 raise SystemExit(f"ext_compare: {path.name} has two rows for {'.'.join(str(c) for c in key)}")
             rows[key] = row
     return rows
+
+
+def canonical(kind: str, row):
+    """a row as it is compared: the scoped registrations of an instance are a set (tengai-extinfo sorts them, a file written by hand or by another version need not)"""
+    if kind == "sinst" and isinstance(row, list):
+        return sorted(row, key=lambda e: json.dumps(e, sort_keys=True))
+    return row
 
 
 def compare_inst(src: dict, snap: dict, mode: str) -> str:
@@ -106,7 +113,7 @@ def compare(source: dict[tuple, dict], snapshot: dict[tuple, dict], mode: str, a
                 if category != "same":
                     detail = {"source": x, "snapshot": y}
             else:
-                category = "same" if x == y else "differs"
+                category = "same" if canonical(kind, x) == canonical(kind, y) else "differs"
                 if category == "differs":
                     detail = {"source": x, "snapshot": y}
             if core:

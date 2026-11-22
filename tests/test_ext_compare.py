@@ -97,6 +97,18 @@ class Compare(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["kinds"]["inst"]["differs"], 1)
 
+    def test_the_scoped_registrations_of_an_instance_are_compared_as_a_set_and_a_loss_is_a_loss(self):
+        a = [{"ns": ["Pointwise"], "prio": 1000}, {"ns": ["Classical"], "prio": 10}]
+        source = table(row(["i"], sinst=a))
+        r = E.compare(source, table(row(["i"], sinst=list(reversed(a)))), "global")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["kinds"]["sinst"], {"same": 1})
+        r = E.compare(source, table(row(["i"], sinst=[{"ns": ["Pointwise"], "prio": 1000}])), "global")  # one namespace missing
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["kinds"]["sinst"], {"differs": 1})
+        r = E.compare(source, table(row(["i"], red="reducible")), "global")  # the scoped instance did not make it
+        self.assertEqual((r["kinds"]["sinst"], r["examples"]["lost"][0]["kind"]), ({"lost": 1}, "sinst"))
+
     def test_the_examples_are_limited_and_the_counts_are_not(self):
         n = E.EXAMPLES + 20
         source = table(*[row(["c", i], red="reducible") for i in range(n)])
