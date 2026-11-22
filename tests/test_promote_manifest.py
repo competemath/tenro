@@ -271,6 +271,7 @@ class ManifestLayers(unittest.TestCase):
             self.assertEqual(
                 m["checks"]["session_load"]["sets"]["Topic_A"], {"olean_mb": 0.6, "median": 0.32, "net_median": 0.08, "net_min": 0.07}
             )
+            self.assertNotIn("cap", m["checks"]["session_load"])  # a promotion measured before the cap was recorded has none
             self.assertTrue(m["checks"]["axioms"]["standard_only"])
 
     def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
@@ -331,6 +332,59 @@ class ManifestLayers(unittest.TestCase):
             self.assertEqual(m["flavor"], "statements")
             self.assertEqual(m["indexes"]["layers"], {"placed": 1, "unplaced": 0})
             self.assertEqual(sorted(m["indexes"]["files"]), ["layers-stats.json", "layers.jsonl"])
+
+    def test_the_faithfulness_check_is_recorded_when_it_ran_and_null_when_it_did_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            )  # it did not run: null, never true
+            report = {
+                "names": 10,
+                "not_asked": 2,
+                "compared": 8,
+                "absent_in_both": 0,
+                "statement_stubs": 5,
+                "kept_with_value": 1,
+                "same_with_value": 1,
+                "same_without_value": 1,
+                "refused_and_stubbed": 0,
+                "by_kind": {"thm->axiom": 5},
+                "problems": {},
+                "problem_counts": {},
+                "passed": True,
+            }
+            (d / "faithful.json").write_text(json.dumps(report))
+            f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            self.assertEqual((f["names"], f["compared"], f["statement_stubs"], f["kept_with_value"], f["not_asked"]), (10, 8, 5, 1, 2))
+            self.assertEqual((f["problems"], f["ok"]), ({}, True))
+            report.update({"passed": False, "problem_counts": {"type_differs": 3}})
+            (d / "faithful.json").write_text(json.dumps(report))
+            f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            self.assertEqual((f["problems"], f["ok"]), ({"type_differs": 3}, False))
+
+    def test_the_cap_the_sessions_were_judged_against_is_recorded_when_the_run_wrote_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            load = json.loads((d / "layers-load.json").read_text())
+            load["cap"] = 0.25
+            (d / "layers-load.json").write_text(json.dumps(load))
+            self.assertEqual(M.build_layers(d, d / "layered", {})["checks"]["session_load"]["cap"], 0.25)
+
+    def test_the_attribution_is_recorded_when_there_is_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertNotIn("attribution", M.build_layers(d, d / "layered", {}))
+            att = {
+                "libraries": {"A": {"sources": [{"repo": "https://github.com/o/a", "commit": "c" * 40, "licence": "MIT"}], "records": 2}},
+                "licences": {"MIT": 1},
+                "unknown": [],
+            }
+            (d / "attribution.json").write_text(json.dumps(att))
+            self.assertEqual(M.build_layers(d, d / "layered", {})["attribution"], att)
 
     def test_the_manifest_is_the_same_for_the_same_inputs_and_main_writes_it(self):
         with tempfile.TemporaryDirectory() as d:

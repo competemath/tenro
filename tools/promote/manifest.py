@@ -181,10 +181,14 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
     )
     ids = read_json(d / "statement-ids-layers.json")
     load = read_json(d / "layers-load.json")
+    faithful = read_json(d / "faithful.json")
+    attribution = read_json(d / "attribution.json")
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
     return {
         "schema": 2,
         **({"flavor": flavor} if flavor else {}),
+        # where the content comes from: per library the repository, the commit and the licence (tools/promote/attribution.py)
+        **({"attribution": attribution} if attribution is not None else {}),
         **({"indexes": index_record(indexes)} if indexes is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
@@ -215,10 +219,32 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
                 "ok": ids["ok"],
             },
             "axioms": axioms_check(axioms_text, names),
+            # a replay against the environment it was exported from (tengai-typeinfo --hashes, tools/promote/faithful.py): null when it did not run
+            "faithful": None
+            if faithful is None
+            else {
+                **{
+                    k: faithful[k]
+                    for k in (
+                        "names",
+                        "compared",
+                        "statement_stubs",
+                        "kept_with_value",
+                        "same_with_value",
+                        "same_without_value",
+                        "refused_and_stubbed",
+                        "absent_in_both",
+                        "not_asked",
+                    )
+                },
+                "problems": faithful["problem_counts"],
+                "ok": faithful["passed"],
+            },
             "session_load": None
             if load is None
             else {
                 "baseline": load.get("empty"),
+                **({"cap": load["cap"]} if "cap" in load else {}),  # the cap of perf-budget.toml the sessions were judged against
                 "sets": {
                     row[0]: {
                         "olean_mb": round(row[1], 1),
