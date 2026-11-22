@@ -48,7 +48,32 @@ The same question for Lean core alone, from the exports themselves (workflow `ex
 
 The rule costs size (the first version, theorems as axioms only, was 147 MB for the sample, which the kernel then refused at `Rat.instEncodable`): 1.6 times the module, and the exporter's memory is the limit of the approach on a 16 GB runner (12.5 GB for the intake; the whole `Tengoku.All` with this rule would not fit, hence waves: the seed first, the intake on top of it). The replay is near the same limit: 14.3 GB of the runner's 16, in 37 minutes.
 
-**One module of all the intake is over the cap.** The cold-load cap `C_load` is 0.25 s (`perf-budget.toml`, lowered only) and the whole intake as one module costs 0.30 s over an empty session (run 44991509898; minimum to minimum, 0.2305 s to 0.5264 s: +0.296 s). The cost does not grow with the number of constants: 11 times the constants (55,316 to 612,257) and 15 times the bytes cost 44 times the import time (0.125 µs a constant for the sample, 0.49 µs for the intake), so the cap cannot be read off the sample, only measured on what a session loads. The remedy is the one the proofs flavor already uses: a foundation and one layer per library (`tools/promote/layers.py`, `tengai-replay --import` and `--only`), so that a session loads the foundation and its own topic. How large the foundation is, constants used by two libraries or more, is the next number; if it is itself near the cap, one foundation is not enough.
+**One module of all the intake is over the cap.** The cold-load cap `C_load` is 0.25 s (`perf-budget.toml`, lowered only) and the whole intake as one module costs 0.30 s over an empty session (run 44991509898; minimum to minimum, 0.2305 s to 0.5264 s: +0.296 s). The cost does not grow with the number of constants: 11 times the constants (55,316 to 612,257) and 15 times the bytes cost 44 times the import time (0.125 µs a constant for the sample, 0.49 µs for the intake), so the cap cannot be read off the sample, only measured on what a session loads. The remedy is the one the proofs flavor already uses: a foundation and one layer per library (`tools/promote/layers.py`, `tengai-replay --import` and `--only`), so that a session loads the foundation and its own topic. The next section is that, measured.
+
+## The layered snapshot of all the intake: every session is under the cap
+
+All the intake as statements (the export of run 44996811094: 311,773 theorems of 228 libraries, after the 84 sampled names that are not constants of the tree were taken out; 635,796 constants), with the libraries as topics, planned by `tools/promote/layers.py` (3 min 56 s, 2.47 GB of Python):
+
+| | |
+|---|---|
+| the foundation: a constant two libraries or more need | 73,784 units, **78,464 constants (12.3 %)** |
+| the layer of a library: what only that library needs | smallest 2, median 637, 90th percentile 3,927, largest 72,288 constants (lean-pool); together 557,332 |
+| the statement of each theorem | in the layer of its library, **none in the foundation**: the layers index places 311,773 of 311,773 |
+| what a library uses of the foundation | 275 to 57,800 units, median 9,527, of 73,784 |
+
+Replayed (run 45000625394, `tengai-replay` v0.0.17): the export is parsed once into 2.59 GB of tables (3 to 3.5 minutes, 12.2 GB in the run that measured it, 44998867847), then each layer is its own process: the foundation 2 min 46 s (3.1 GB), Tauceti 6 min 50 s, NavierStokesEuler 4 min 35 s, OpenaiMath 1 min 51 s, LeanPool 1 min 20 s, the median layer 0.7 s, none over 6.7 GB; 31 minutes for the 229 layers and about 35 with the parse. **Nothing refused**: 0 of 612,257 constants added. A session is the foundation and one library; its cold import over an empty module (paired median of 9 rounds; the empty module took 0.176 s; the cap `C_load` is 0.25 s):
+
+| session | constants loaded | net import |
+|---|---:|---:|
+| the foundation | 78,464 | +0.017 s |
+| the foundation and one library: the 228 of them, minimum / median / 90th percentile | | +0.007 / **+0.013** / +0.016 s |
+| the slowest: Tauceti, OpenaiMath, NavierStokesEuler, LeanPool | 145,340 / 140,626 / 134,048 / 150,752 | **+0.038** / +0.033 / +0.031 / +0.030 s |
+| the foundation and the four largest libraries together | 335,374 | +0.099 s |
+| everything, the 229 layers together | 635,796 (3.9 GB of oleans) | +0.210 s |
+
+**No session is over the cap** (229 measured: the foundation, and the foundation with each library). The snapshot is 3,902,373,416 bytes of `.olean` and **648,240,378 bytes (648 MB) as one archive** (`zstd -19 --long=27`, 9 min 12 s, 648 MB of memory); `pack.py verify` of the archive passed, and a session from the unpacked copy imported eight layers and `#check`ed 24 theorems of the layers index. The manifest (`flavor: statements`) records the pins (the tenro commit that made the export, Tengoku `1d727eb`, the exporter patch's sha256, lean4export `483e011`, the tengai tag) and the 0 refused.
+
+Two things the numbers do not say. "Everything" at +0.210 s is under the cap, but the one-module build of the same content measured +0.30 s in the run above: the two are from different runs on different runners (the empty module took 0.176 s here and 0.233 s there), so this is not a claim that the layered form loads the whole faster. And the snapshot is Tengoku **at the pin** (`1d727eb`, 20 Nov 08:18 UTC), not at the head of the intake since.
 
 ## What the first replay of the whole tree refused, and the rule it taught
 
@@ -61,7 +86,8 @@ A theorem stood as an axiom can be typed against, rewritten with and applied; it
 
 ## What it does not say, yet
 
-* **Coverage.** That closure holds what the 4,778 *statements* reach. A base also needs the lemmas of the seed (Mathlib) that no promoted statement mentions: the whole tree has to be exported as statements (the workflow's job), not a sample.
-* **Statement ids.** `tengoku-isnad` reads theorems; a statements module has axioms. The comparison with Tengoku's ids needs either an isnad option for axioms (a Tengoku change) or a comparison of types from the exports.
+* **Coverage.** The snapshot holds what the 311,773 intake statements reach. The seed's other lemma statements, about **650,000** (998,428 axioms in the whole-tree export of run 44952755442 against 351,092 in the all-intake one), are not in it, and a proof uses lemmas that no statement mentions. `layers.py` reads a tree of topics (tenro#101: `Seed/<area>` and `Intake/<library>`, a constant at the lowest node that holds every topic that needs it) and `Modules.lean` with `tree_topics.py` make the topics of a whole tree by module path; none of it has run on the whole tree. Whether its replay fits a 16 GB runner is not known: the parse of the intake alone took 12.2 GB.
+* **Faithfulness to Tengoku.** What backs "these are Tengoku's statements" today: `compare_exports.py` between the full and the statements export (Init, the repro modules), the kernel's check of every replayed declaration, and the 30 statement ids that matched in the first proofs-flavor transplant. Not at the scale of the snapshot. `tengai-typeinfo --hashes` (tengai v0.0.18) prints a record a declaration (its kind, the hash and the size of its type, the hash of its value) that Tengoku's environment and the snapshot's can be compared by, whatever the binder names the exporter shared; the comparison over every layer (`tools/promote/faithful.py`) is not run yet. The hash is Lean's 32 bits: a record that agrees makes a difference very unlikely, it does not prove there is none.
+* **Statement ids.** `tengoku-isnad` reads theorems; a statements module has axioms, and at the last count (22 Nov) 37 % of the tree's rows had no id in their source. The retrieval indexes keyed by id are not built for this snapshot; the layers index (`indexes/layers.jsonl`: theorem name to the layer that holds it) is.
 * **Replay.** A definition whose body needs the kernel to unfold a theorem (a reduction through a well-foundedness proof) does not replay with that theorem as an axiom: it fails loudly, or, with `--stub-refused`, stands as an axiom of its type and is listed. With the rule of v2 none of the 612,257 constants of the intake export was refused (run 44991509898: the probe printed "0 declarations were refused by the kernel"). The seed's other lemmas, the part of the whole tree that no intake statement reaches, have not been replayed.
 * **Proving.** Nothing here says a prover does as well in a statements environment; that is a hypothesis for a campaign.
