@@ -58,7 +58,9 @@ def test_the_manifest_pins_the_flag():
 
 def test_the_extension_rows_are_read_for_every_constant_not_only_the_first_name_of_each_unit():
     # tengai-extinfo looks up the names it is given and expands nothing: the constructors and recursors of an inductive block have binder annotations to restore too
-    steps = [(n, r) for n, r in runs() if "tengai-extinfo" in r and "lake env" in r]
+    steps = [
+        (n, r) for n, r in runs() if 'lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo"' in r
+    ]  # in Tengoku's environment
     assert len(steps) == 1, [n for n, _ in steps]
     run = steps[0][1]
     assert "layers/*.constants.jsonl" in run and "names.jsonl" not in run.replace("ext-names.jsonl", "")
@@ -168,3 +170,34 @@ def test_the_manifest_and_the_archive_both_take_the_licence_texts_when_there_are
     assert 'legal_args=(--legal "$RUNNER_TEMP/legal")' in run and "LICENSES/INDEX.json" in run, "only when the writer left its index"
     for line in (ln for ln in run.splitlines() if "manifest.py layers" in ln or "pack.py pack" in ln):
         assert '"${legal_args[@]}"' in line, line[:100]
+
+
+def ext_compare_step():
+    steps = [s for s in JOB if "ext_compare.py" in s.get("run", "")]
+    assert len(steps) == 1
+    return steps[0]
+
+
+def test_the_extension_entries_are_read_back_by_the_same_tool_from_the_snapshot_and_compared_without_ending_the_run():
+    step = ext_compare_step()
+    run = step["run"]
+    assert step.get("continue-on-error") is True, (
+        "a difference is recorded and refused by the release gate; a run of an hour does not end on it"
+    )
+    assert "tengai-extinfo" in run and 'LEAN_PATH="$RUNNER_TEMP/layered:$core_path"' in run, "the snapshot's environment, not Tengoku's"
+    assert "replayed-constants.jsonl" in run and "constants.jsonl" in run and "names.jsonl" not in run, (
+        "every constant, not the first name of each unit"
+    )
+    assert "mapfile -t mods" in run
+    assert 'mode=global; if [ "$SCOPED_INSTANCES" = true ]; then mode=scoped; fi' in run and '--instances "$mode"' in run
+    assert '[ ! -s "$RUNNER_TEMP/ext.jsonl" ]' in run and "exit 0" in run, (
+        "an export without extension rows: said, not compared, not failed"
+    )
+
+
+def test_the_extension_comparison_writes_the_file_the_manifest_reads_and_the_artifact_keeps_it():
+    run = ext_compare_step()["run"]
+    manifest = (WORKFLOW.parent.parent.parent / "tools" / "promote" / "manifest.py").read_text()
+    assert '--out "$RUNNER_TEMP/ext-faithful.json"' in run and "ext-faithful.json" in manifest
+    upload = [s for s in JOB if "upload-artifact" in s.get("uses", "") and "statements-snapshot" in str(s.get("with", {}).get("name", ""))]
+    assert "ext-faithful.json" in upload[0]["with"]["path"]

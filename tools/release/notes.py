@@ -36,6 +36,13 @@ def gates(m: dict) -> list[str]:
     ext = checks.get("extensions")
     if ext is not None and not ext.get("ok"):
         problems.append(f"Lean refused {ext.get('failed')} extension entries the snapshot was to carry")
+    ext_faithful = checks.get("ext_faithful")
+    if ext is not None and ext_faithful is None:
+        problems.append("extension entries were put back and never compared with Tengoku's (the comparison did not run)")
+    elif ext_faithful is not None and not ext_faithful.get("ok"):
+        problems.append(
+            f"the extension entries of the snapshot differ from Tengoku's: {ext_faithful.get('differs')} differ, {ext_faithful.get('lost')} lost, {ext_faithful.get('extra')} extra"
+        )
     legal = m.get("legal")
     if legal is None:
         problems.append(
@@ -117,6 +124,12 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
             f"- extension entries put back in {ext['layers']} layers: {ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, "
             f"{ext['reducibility']:,} reducibility attributes; refused by Lean: {ext['failed']};"
         )
+        ef = checks.get("ext_faithful")
+        if ef:
+            lines.append(
+                f"- **the extension entries read back by the same tool** (`tengai-extinfo`) in Tengoku's environment and in the snapshot's: {ef['same']:,} entries the same, {ef['differs']:,} differ, {ef['lost']:,} lost, {ef['extra']:,} extra; "
+                f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'});"
+            )
     if worst and cap:
         lines.append(
             f"- every session (the foundation and one library) over an empty module, paired medians: the slowest is {worst[0]} at +{worst[1]['net_median']:.3f} s; the cap is {cap} s;"
