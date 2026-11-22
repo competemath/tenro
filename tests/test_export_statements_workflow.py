@@ -201,3 +201,55 @@ def test_the_extension_comparison_writes_the_file_the_manifest_reads_and_the_art
     assert '--out "$RUNNER_TEMP/ext-faithful.json"' in run and "ext-faithful.json" in manifest
     upload = [s for s in JOB if "upload-artifact" in s.get("uses", "") and "statements-snapshot" in str(s.get("with", {}).get("name", ""))]
     assert "ext-faithful.json" in upload[0]["with"]["path"]
+
+
+def run_conf(permit_all: str, error: str) -> dict:
+    """the real conf() of the nanoda step, run by bash, and what it writes"""
+    import json
+    import subprocess
+
+    run = nanoda_step()
+    start = run.index("conf() {")
+    end = run.index("\n}\n", start) + 3
+    out = subprocess.run(
+        ["bash", "-c", run[start:end] + f"\nconf /x/layered.ndjson {permit_all} {error}"], capture_output=True, text=True, check=True
+    ).stdout
+    return json.loads(out)
+
+
+def test_nanoda_gets_a_configuration_it_accepts_in_each_of_the_three_runs():
+    # the rules of the pinned nanoda (src/util.rs, Config::try_from): `unsafe_permit_all_axioms` needs `unpermitted_axiom_hard_error: false` and NO `permitted_axioms` key at all (the first rehearsal of the
+    # step was refused: "unsafe_permit_all_axioms && nonempty permitted_axioms list"); without `print_axioms: false` it prints every admitted axiom and reports a pretty printer error
+    every = run_conf("true", "false")  # the real run: every axiom admitted (the statements that stand as axioms)
+    assert every["unsafe_permit_all_axioms"] is True and every["unpermitted_axiom_hard_error"] is False
+    assert "permitted_axioms" not in every
+    assert every["print_axioms"] is False and every["print_success_message"] is True
+    strict = run_conf("false", "true")  # the control and the selftest: every axiom but the standard ones an error
+    assert strict["unsafe_permit_all_axioms"] is False and strict["unpermitted_axiom_hard_error"] is True
+    assert (
+        "propext" in strict["permitted_axioms"]
+        and "Classical.choice" in strict["permitted_axioms"]
+        and "Quot.sound" in strict["permitted_axioms"]
+    )
+    for conf in (every, strict):
+        assert conf["export_file_path"] == "/x/layered.ndjson" and conf["use_stdin"] is False and conf["print_axioms"] is False
+
+
+def test_the_selftest_must_print_the_success_line_the_real_run_is_read_from_and_the_control_must_stop_on_an_axiom():
+    run = nanoda_step()
+    assert "nanoda-selftest.out" in run and "Checked [0-9]+ declarations with no errors" in run
+    assert "the selftest of nanoda did not print the success line" in run
+    assert (
+        "grep -qi 'axiom'" in run
+        and "the control stopped, but not on an axiom" in run
+        and 'head -3 "$RUNNER_TEMP/nanoda-control.out"' in run
+    )
+
+
+def test_every_layer_says_which_constants_it_added_and_the_comparison_judges_only_those():
+    replays = [r for _, r in runs() if '--stub-refused "${args[@]}"' in r and "--tables" in r]
+    assert len(replays) == 1
+    assert '--added "$RUNNER_TEMP/added/$module.jsonl"' in replays[0] and 'mkdir -p "$RUNNER_TEMP/added"' in replays[0]
+    run = ext_compare_step()["run"]
+    assert 'cat "$RUNNER_TEMP"/added/*.jsonl > "$RUNNER_TEMP/added-all.jsonl"' in run
+    assert '--added "$RUNNER_TEMP/added-all.jsonl"' in run

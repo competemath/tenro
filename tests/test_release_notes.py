@@ -65,6 +65,7 @@ EXT_FAITHFUL = {
     "extra": 0,
     "deviation": 7,
     "deviations": {"scoped_became_global": 7},
+    "core": {"constants": 40, "same": 50, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
     "ok": True,
 }
 EXT = {"layers": 2, "reducibility": 11, "projections": 4, "structures": 3, "classes": 2, "instances": 1234, "failed": 0, "ok": True}
@@ -165,6 +166,12 @@ class Texts(unittest.TestCase):
         self.assertIn("read back by the same tool", text)
         self.assertIn("900 entries the same, 0 differ, 0 lost, 0 extra", text)
         self.assertIn("instances registered global, of which 7 are the other way in Tengoku ({'scoped_became_global': 7})", text)
+        self.assertIn("of Lean core's own constants, which the replay leaves alone, 1 entries differ from Tengoku's", text)
+        no_core = copy.deepcopy(m)
+        no_core["checks"]["ext_faithful"]["core"] = (
+            None  # a comparison that did not know which constants the replay added says nothing about core's
+        )
+        self.assertNotIn("Lean core's own constants", N.notes_md(no_core, "snapshot-x", "1", 100, SHA))
 
     def test_the_notes_say_that_an_independent_kernel_accepted_the_layers_and_then_do_not_list_it_as_unchecked(self):
         m = copy.deepcopy(MANIFEST)

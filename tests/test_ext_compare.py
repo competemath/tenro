@@ -109,6 +109,44 @@ class Compare(unittest.TestCase):
             E.compare({}, {}, "both")
 
 
+class CoreConstants(unittest.TestCase):
+    # the first rehearsal (3 libraries, 75,546 entries): ONE entry differed, `instSMulOfMul`, the anonymous instance of Init.Prelude: priority 910 in Lean core, 1100 in Tengoku (a library re-registered it)
+    CORE_SRC = table(row(["instSMulOfMul"], inst={"prio": 1100, "kind": "global"}, red="instanceReducible"), row(["f"], red="reducible"))
+    CORE_SNAP = table(row(["instSMulOfMul"], inst={"prio": 910, "kind": "global"}, red="instanceReducible"), row(["f"], red="reducible"))
+
+    def test_a_difference_on_a_constant_lean_core_holds_is_reported_apart_and_not_judged(self):
+        r = E.compare(self.CORE_SRC, self.CORE_SNAP, "global", added={("f",)})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["totals"]["differs"], 0)
+        self.assertEqual(
+            r["core"], {"constants": 1, "same": 1, "differs": 1, "lost": 0, "extra": 0, "deviation": 0}
+        )  # the reducibility of the core constant agrees, its instance does not
+        e = r["examples"]["core"][0]
+        self.assertEqual((e["name"], e["kind"], e["how"]), ("instSMulOfMul", "inst", "differs"))
+        self.assertEqual((e["detail"]["source"]["prio"], e["detail"]["snapshot"]["prio"]), (1100, 910))
+
+    def test_the_same_difference_on_a_constant_the_replay_added_is_a_problem(self):
+        r = E.compare(self.CORE_SRC, self.CORE_SNAP, "global", added={("f",), ("instSMulOfMul",)})
+        self.assertFalse(r["ok"])
+        self.assertEqual((r["totals"]["differs"], r["core"]["constants"]), (1, 0))
+
+    def test_without_the_added_names_every_constant_counts_and_there_is_no_core_section(self):
+        r = E.compare(self.CORE_SRC, self.CORE_SNAP, "global")
+        self.assertFalse(r["ok"])
+        self.assertIsNone(r["core"])
+
+    def test_a_lost_entry_of_a_core_constant_is_counted_apart_too(self):
+        r = E.compare(self.CORE_SRC, table(row(["f"], red="reducible")), "global", added={("f",)})
+        self.assertTrue(r["ok"])
+        self.assertEqual((r["core"]["lost"], r["core"]["same"]), (2, 0))
+
+    def test_an_instance_deviation_of_a_core_constant_is_not_a_deviation_of_the_snapshot(self):
+        src = table(row(["Classical", "propDecidable"], inst={"prio": 10, "kind": "scoped"}))
+        snap = table(row(["Classical", "propDecidable"], inst={"prio": 10, "kind": "global"}))
+        r = E.compare(src, snap, "global", added=set())
+        self.assertEqual((r["totals"]["deviation"], r["deviations"], r["core"]["deviation"]), (0, {}, 1))
+
+
 class Files(unittest.TestCase):
     def write(self, d: Path, name: str, rows) -> Path:
         p = d / name
@@ -128,6 +166,32 @@ class Files(unittest.TestCase):
             with self.assertRaises(SystemExit) as c:
                 E.read(d / "twice.jsonl")
             self.assertIn("two rows for a", str(c.exception))
+
+    def test_read_added_reads_names_and_refuses_a_line_that_is_not_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "a.jsonl").write_text('["a"]\n\n["b", 3, "c"]\n')
+            self.assertEqual(E.read_added(d / "a.jsonl"), {("a",), ("b", 3, "c")})
+            (d / "bad.jsonl").write_text("nope\n")
+            with self.assertRaises(SystemExit):
+                E.read_added(d / "bad.jsonl")
+
+    def test_main_with_the_added_names_says_what_it_found_in_lean_cores_constants_and_shows_the_detail(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            src = self.write(d, "s.jsonl", list(CoreConstants.CORE_SRC.values()))
+            snap = self.write(d, "t.jsonl", list(CoreConstants.CORE_SNAP.values()))
+            (d / "added.jsonl").write_text('["f"]\n')
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(
+                    E.main([str(src), str(snap), "--instances", "global", "--added", str(d / "added.jsonl"), "--out", str(d / "r.json")]), 0
+                )
+            text = out.getvalue()
+            self.assertIn("Lean core's own constants (1, left alone by the replay): 1 entries the same, 1 differ", text)
+            self.assertIn("core differs: instSMulOfMul (inst)", text)
+            self.assertIn('"prio": 910', text)
+            self.assertIn("no problem", text)
 
     def test_main_writes_the_report_and_its_exit_status_is_the_verdict(self):
         with tempfile.TemporaryDirectory() as d:
