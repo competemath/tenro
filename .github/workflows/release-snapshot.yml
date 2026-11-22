@@ -1,0 +1,65 @@
+# Publishes a statements snapshot (the artifact `statements-snapshot-<run id>` of an export-statements run with `pack`) as a pre-release of this repository. Manual, from main only, and it publishes: running it is the act
+# of publication. It re-verifies the archive (sha256, `pack.py verify`: every olean against the manifest) and refuses to release unless the gates of tools/release/notes.py hold: a statements snapshot, every layer accepted by the kernel,
+# the comparison with Tengoku's environment run and without a problem, and every library with a repository, a commit and a licence. The release is a PRE-RELEASE named snapshot-<name> (never a version: the release barrier,
+# docs/release-barrier.md, release-guard.toml), with the archive, the manifest, SHA256SUMS, ATTRIBUTION.md and notes that say what it is and what was not checked.
+name: release-snapshot
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "The id of the export-statements run that made the artifact statements-snapshot-<id>"
+        required: true
+      tag:
+        description: "The tag: snapshot-<name> (letters, digits, dot, dash, underscore); never a version"
+        required: true
+permissions: {}
+concurrency:
+  group: release-snapshot
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  RUN_ID: ${{ inputs.run_id }}
+  TAG: ${{ inputs.tag }}
+  GH_TOKEN: ${{ github.token }}
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions: { contents: write, actions: read }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: "3.12" }
+      - name: The inputs
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]] || { echo "::error::bad run_id"; exit 1; }
+          [[ "$TAG" =~ ^snapshot-[A-Za-z0-9._-]{1,60}$ ]] || { echo "::error::the tag must be snapshot-<name>"; exit 1; }
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "::error::a release $TAG exists already"; exit 1; fi
+          if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" >/dev/null 2>&1; then echo "::error::a tag $TAG exists already"; exit 1; fi
+      - name: The artifact of the run, and its archive verified
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "statements-snapshot-$RUN_ID" --dir "$RUNNER_TEMP/snap"
+          ls -l "$RUNNER_TEMP/snap"
+          want="$(cut -d' ' -f1 "$RUNNER_TEMP/snap/zstd-sha256.txt")"
+          got="$(sha256sum "$RUNNER_TEMP/snap/snapshot.tar.zst" | cut -d' ' -f1)"
+          [ "$want" = "$got" ] || { echo "::error::the archive's sha256 is $got, the run recorded $want"; exit 1; }
+          python3 tools/release/pack.py verify "$RUNNER_TEMP/snap/snapshot.tar.zst" --sha256 "$got" --into "$RUNNER_TEMP/unpacked" | tee "$RUNNER_TEMP/verify.json"
+          cmp "$RUNNER_TEMP/snap/manifest.json" "$RUNNER_TEMP/unpacked/manifest.json" || { echo "::error::the manifest next to the archive is not the one inside it"; exit 1; }
+          rm -rf "$RUNNER_TEMP/unpacked"
+          echo "ARCHIVE_SHA256=$got" >> "$GITHUB_ENV"
+          echo "ARCHIVE_BYTES=$(stat -c %s "$RUNNER_TEMP/snap/snapshot.tar.zst")" >> "$GITHUB_ENV"
+      - name: The gates, the notes and the attribution
+        run: |
+          python3 tools/release/notes.py "$RUNNER_TEMP/snap/manifest.json" --tag "$TAG" --run "$RUN_ID" --archive-bytes "$ARCHIVE_BYTES" --archive-sha256 "$ARCHIVE_SHA256" --out-notes "$RUNNER_TEMP/notes.md" --out-attribution "$RUNNER_TEMP/ATTRIBUTION.md"
+          cat "$RUNNER_TEMP/notes.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          (cd "$RUNNER_TEMP/snap" && sha256sum snapshot.tar.zst manifest.json > "$RUNNER_TEMP/SHA256SUMS")
+          cp "$RUNNER_TEMP/SHA256SUMS" "$RUNNER_TEMP/snap/SHA256SUMS"
+      - name: The pre-release
+        run: |
+          gh release create "$TAG" "$RUNNER_TEMP/snap/snapshot.tar.zst" "$RUNNER_TEMP/snap/manifest.json" "$RUNNER_TEMP/ATTRIBUTION.md" "$RUNNER_TEMP/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG: Tengoku's statements as a layered snapshot (experimental)" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,isPrerelease,assets -q '"\(.url) prerelease=\(.isPrerelease) assets=\([.assets[].name]|join(","))"' | tee -a "$GITHUB_STEP_SUMMARY"

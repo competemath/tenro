@@ -271,6 +271,7 @@ class ManifestLayers(unittest.TestCase):
             self.assertEqual(
                 m["checks"]["session_load"]["sets"]["Topic_A"], {"olean_mb": 0.6, "median": 0.32, "net_median": 0.08, "net_min": 0.07}
             )
+            self.assertNotIn("cap", m["checks"]["session_load"])  # a promotion measured before the cap was recorded has none
             self.assertTrue(m["checks"]["axioms"]["standard_only"])
 
     def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
@@ -362,6 +363,15 @@ class ManifestLayers(unittest.TestCase):
             (d / "faithful.json").write_text(json.dumps(report))
             f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
             self.assertEqual((f["problems"], f["ok"]), ({"type_differs": 3}, False))
+
+    def test_the_cap_the_sessions_were_judged_against_is_recorded_when_the_run_wrote_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            load = json.loads((d / "layers-load.json").read_text())
+            load["cap"] = 0.25
+            (d / "layers-load.json").write_text(json.dumps(load))
+            self.assertEqual(M.build_layers(d, d / "layered", {})["checks"]["session_load"]["cap"], 0.25)
 
     def test_the_attribution_is_recorded_when_there_is_one(self):
         with tempfile.TemporaryDirectory() as d:

@@ -244,6 +244,7 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
             if load is None
             else {
                 "baseline": load.get("empty"),
+                **({"cap": load["cap"]} if "cap" in load else {}),  # the cap of perf-budget.toml the sessions were judged against
                 "sets": {
                     row[0]: {
                         "olean_mb": round(row[1], 1),
