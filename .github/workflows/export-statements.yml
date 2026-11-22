@@ -358,6 +358,7 @@ jobs:
                   f.write(f"import {layer}\n")
               f.write("\n" + "".join(f"#check @{n}\n" for n in names))
           print(len(names), "names in", len(set(chosen)), "layers")
+          open(f"{t}/check-count.txt", "w", encoding="utf-8").write(str(len(names)))
           PY
           core_path="$(cd core && lake env printenv LEAN_PATH)"
           (cd core && LEAN_PATH="$RUNNER_TEMP/unpacked:$core_path" lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/check.out" 2> "$RUNNER_TEMP/check.err") || { head -20 "$RUNNER_TEMP/check.err" "$RUNNER_TEMP/check.out"; exit 1; }
@@ -369,7 +370,7 @@ jobs:
           v = json.load(open(f"{t}/verify.json", encoding="utf-8"))
           pk = json.load(open(f"{t}/pack.json", encoding="utf-8"))
           idx = json.load(open(f"{t}/indexes/layers-stats.json", encoding="utf-8"))
-          checks = open(f"{t}/check.out", encoding="utf-8").read().count(" : ")
+          checks = int(open(f"{t}/check-count.txt", encoding="utf-8").read())  # the names the session `#check`ed (a count of " : " in its output would count the binders of the types too)
           zst = os.path.getsize(f"{t}/snapshot.tar.zst")
           zst_sha = open(f"{t}/zstd-sha256.txt", encoding="utf-8").read().split()[0]
           print("### The statements snapshot")
