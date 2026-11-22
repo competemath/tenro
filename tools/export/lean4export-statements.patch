@@ -1,6 +1,8 @@
+diff --git a/Export.lean b/Export.lean
+index e77a14f..46464f7 100644
 --- a/Export.lean
 +++ b/Export.lean
-@@ -40,6 +40,10 @@
+@@ -40,6 +40,10 @@ structure State where
    noMDataExprs : HashMap Expr Expr := HashMap.emptyWithCapacity 100000
    exportMData : Bool := false
    exportUnsafe : Bool := false
@@ -11,7 +13,7 @@
    ignoreMissing : Bool := false
    /-- Maps the name of an inductive type to a list of names of corresponding recursors.
    This is used to facilitate exporting of related inductives, constructors, and recursors as a unit. -/
-@@ -52,6 +56,20 @@
+@@ -52,6 +56,20 @@ def M.run (env : Environment) (act : M α) : IO α :=
      ReaderT.run (r := { env }) do
        act
  
@@ -32,12 +34,14 @@
  /--
  Initialize the exporter state from an environment and cli options.
  The `recursorMap` maps each inductive declaration's name to the list
-@@ -68,9 +86,15 @@
+@@ -68,9 +86,17 @@ def initState (env : Environment) (cliOptions : List String := []) : M Unit := d
            fun
            | none => some <| NameSet.empty.insert recVal.name
            | some recNames => some <| recNames.insert recVal.name
 +  let statements := cliOptions.any (· == "--statements")
-+  let kept := if statements then proofsUsedByDefinitions env else {}
++  -- `--drop-proofs`: no theorem is kept with its proof (the first version of `--statements`): a much smaller export of a large tree, in which a definition that only computes through a proof is refused by the kernel at replay
++  let dropProofs := cliOptions.any (· == "--drop-proofs")
++  let kept := if statements && !dropProofs then proofsUsedByDefinitions env else {}
 +  if statements then
 +    IO.eprintln s!"lean4export --statements: {kept.toList.length} theorems are kept with their proofs, the others are axioms of their type"
    modify fun st => { st with
@@ -48,7 +52,7 @@
      ignoreMissing := cliOptions.any (· == "--ignore-missing")
      recursorMap
    }
-@@ -277,17 +301,30 @@
+@@ -277,17 +303,30 @@ partial def dumpConstant (c : Name) : M Unit := do
        ])
      ]
    | .thmInfo val => do
@@ -90,12 +94,29 @@
    | .quotInfo _ =>
      -- Always dump full Quot package in the sensible order
      dumpConstant ``Eq
+diff --git a/Main.lean b/Main.lean
+index 806fcf7..8a8cf8d 100644
 --- a/Main.lean
 +++ b/Main.lean
-@@ -10,6 +10,12 @@
+@@ -7,9 +7,26 @@ def main (args : List String) : IO Unit := do
+   let (imports, constants) := args.span (· != "--")
+   let imports := imports.toArray.map fun mod => { module := Syntax.decodeNameLit ("`" ++ mod) |>.get! }
+   let env ← importModules imports {}
++  -- `--own=Tengoku.Foo` (repeatable): of the whole environment, export only the constants declared in the modules under these names (and what they need): a wave of an export too large for one process.
++  -- The theorems kept with their proofs (`--statements`) are decided over the whole environment either way, so two waves agree on them.
++  let own : List Name := opts.filterMap fun o => if o.startsWith "--own=" then some (o.splitOn "=").getLast!.toName else none
++  let moduleNames : Array Name := env.header.moduleNames
++  let isOwn : Array Bool := moduleNames.map fun m => own.any fun p => p.isPrefixOf m
    let constants := match constants.tail? with
      | some cs => cs.map fun c => Syntax.decodeNameLit ("`" ++ c) |>.get!
-     | none    => env.constants.toList.map Prod.fst |>.filter (!·.isInternal)
+-    | none    => env.constants.toList.map Prod.fst |>.filter (!·.isInternal)
++    | none    =>
++      let all : List Name := env.constants.toList.map Prod.fst |>.filter (fun (n : Name) => !n.isInternal)
++      if own.isEmpty then all
++      else all.filter fun n =>
++        match env.getModuleIdxFor? n with
++        | some i => isOwn[i]!
++        | none => false
 +  -- `--names-file=FILE`: the constants to export, one name a line (a list of hundreds of thousands does not fit on a command line)
 +  let constants ← match opts.findSome? fun o => if o.startsWith "--names-file=" then some (o.splitOn "=").getLast! else none with
 +    | some f => do

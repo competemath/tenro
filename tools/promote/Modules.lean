@@ -1,7 +1,10 @@
 /-
 The theorems of a tree by module: the raw material of the topics of a layered snapshot (tools/promote/tree_topics.py).
 
-  lake env lean --run Modules.lean <Module>...     (from the Lake project that holds the modules; prefix match, like Docs.lean)
+  lake env lean --run Modules.lean [--prefix P] <Module>...     (from the Lake project that holds the modules)
+
+The modules are imported; the theorems listed are those of the modules whose name has one of the modules named as a prefix (like Docs.lean), or, with `--prefix P`, the prefix P (a tree's aggregate module
+`Tengoku.All` is imported, and the prefix `Tengoku` takes every module under it).
 
 One line per theorem the modules declare: `{"m": "the.module", "n": ["name", "components"]}`, the module that declares it and the name as an array of components (a string or a number each), so that no escaping of
 a name is involved and the name a reader makes by joining the components with dots is the one the export's reader makes. Every theorem is listed, a generated one (`eq_1`, `match_1`, `proof_1`) too: a
@@ -19,16 +22,21 @@ def nameToJson (n : Name) : Json :=
 
 unsafe def main (args : List String) : IO UInt32 := do
   enableInitializersExecution
-  if args.isEmpty then
-    IO.eprintln "usage: lake env lean --run Modules.lean <Module>..."
+  let (prefixes, names) := match args with
+    | "--prefix" :: p :: rest => ([p.toName], rest)
+    | ["--prefix"] => ([], [])
+    | _ => ([], args)
+  if names.isEmpty then
+    IO.eprintln "usage: lake env lean --run Modules.lean [--prefix P] <Module>..."
     return 2
   initSearchPath (← findSysroot)
-  let mods := args.map String.toName
+  let mods := names.map String.toName
+  let prefixes := if prefixes.isEmpty then mods else prefixes
   let env ← importModules (mods.toArray.map fun m => { module := m }) {} (trustLevel := 0) (loadExts := true)
   let mut count := 0
   for i in [0:env.header.moduleNames.size] do
     let m := env.header.moduleNames[i]!
-    if !mods.any (·.isPrefixOf m) then continue
+    if !prefixes.any (·.isPrefixOf m) then continue
     for n in env.header.moduleData[i]!.constNames do
       match env.find? n with
       | some ci =>

@@ -238,6 +238,12 @@ class Planning(unittest.TestCase):
         )  # one unit, named by its first type; it holds Foo.mk and Foo.rec as well
         self.assertEqual(p["totals"]["constants"], 6)  # T, the three constants of Foo, the two theorems: counted by constant, not by unit
         self.assertEqual(p["totals"]["units"], 4)
+        # the constants of the layer name every member of the block, the names file only the first name of each unit (the extension entries are read for every constant)
+        self.assertEqual(
+            [".".join(str(c) for c in n) for n in p["constants"]["TengaiData.Foundation"]],
+            ["Foo", "Foo.mk", "Foo.rec", "T"],
+        )
+        self.assertEqual(sum(len(v) for v in p["constants"].values()), p["totals"]["constants"])
 
     def test_a_theorem_that_is_not_in_the_export_is_refused(self):
         with self.assertRaises(SystemExit) as c:
@@ -310,6 +316,11 @@ class CommandLine(unittest.TestCase):
                 ["TengaiData.Foundation.names.jsonl", "TengaiData.Topic.Alpha.names.jsonl", "TengaiData.Topic.Beta.names.jsonl"],
             )
             self.assertEqual((t / "out" / "TengaiData.Topic.Beta.names.jsonl").read_text(), '["B1"]\n')
+            for layer in plan["layers"]:  # a constants file per layer, and it holds at least every name of the names file
+                names_lines = (t / "out" / layer["file"]).read_text().splitlines()
+                constants_lines = (t / "out" / layer["constants_file"]).read_text().splitlines()
+                self.assertTrue(set(names_lines) <= set(constants_lines), layer["module"])
+            self.assertEqual((t / "out" / "TengaiData.Topic.Beta.constants.jsonl").read_text(), '["B1"]\n')
             self.assertEqual(
                 (t / "out" / "TengaiData.Foundation.names.jsonl").read_text().splitlines(), ['["T"]', '["base"]', '["shared"]']
             )

@@ -20,6 +20,12 @@ MANIFEST = {
     "layers": [{"module": "TengaiData.Foundation"}, {"module": "TengaiData.Topic.Alpha"}],
     "pins": {"tengoku": "1d727eb", "tengai": "v0.0.18"},
     "totals": {"olean_bytes": 3_900_000_000, "constants_added": 612257, "theorems": 311773, "refused": 0},
+    "legal": {
+        "files": {"ATTRIBUTION.md": {"bytes": 10, "sha256": "c" * 64}, "LICENSES/INDEX.json": {"bytes": 10, "sha256": "d" * 64}},
+        "sources": 2,
+        "licence_files": 3,
+        "problems": 0,
+    },
     "attribution": {
         "libraries": {
             "alpha": {"sources": [{"repo": "https://github.com/o/alpha", "commit": "a" * 40, "licence": "Apache-2.0"}], "records": 10},
@@ -51,6 +57,20 @@ MANIFEST = {
 }
 
 
+EXT_FAITHFUL = {
+    "instances": "global",
+    "same": 900,
+    "differs": 0,
+    "lost": 0,
+    "extra": 0,
+    "deviation": 7,
+    "deviations": {"scoped_became_global": 7},
+    "core": {"constants": 40, "same": 50, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
+    "ok": True,
+}
+EXT = {"layers": 2, "reducibility": 11, "projections": 4, "structures": 3, "classes": 2, "instances": 1234, "failed": 0, "ok": True}
+
+
 class Gates(unittest.TestCase):
     def test_a_faithful_attributed_statements_snapshot_may_be_released(self):
         self.assertEqual(N.gates(MANIFEST), [])
@@ -62,12 +82,41 @@ class Gates(unittest.TestCase):
             "faithful did not run": lambda m: m["checks"].update(faithful=None),
             "faithful found problems": lambda m: m["checks"]["faithful"].update(ok=False, problems={"type_differs": 2}),
             "no attribution": lambda m: m.pop("attribution"),
+            "no licence texts": lambda m: m.pop("legal"),
+            "a source without a licence text": lambda m: m["legal"].update(problems=2),
+            "licence texts of an unknown state": lambda m: m["legal"].update(problems=None),
             "a library without a licence": lambda m: m["attribution"].update(unknown=["beta"]),
         }
         for name, break_it in cases.items():
             m = copy.deepcopy(MANIFEST)
             break_it(m)
             self.assertNotEqual(N.gates(m), [], name)
+
+    def test_extension_entries_that_lean_refused_stop_a_release_and_none_carried_does_not(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = dict(EXT, failed=3, ok=False)
+        self.assertIn("refused 3 extension entries", " ".join(N.gates(m)))
+        m["checks"]["extensions"] = EXT
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL  # put back and compared: nothing refused
+        self.assertEqual(N.gates(m), [])
+        self.assertEqual(N.gates(MANIFEST), [])  # a snapshot without them (checks.extensions absent) is released as constants only
+
+    def test_extension_entries_that_were_put_back_must_have_been_compared_and_must_agree(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        self.assertIn("never compared", " ".join(N.gates(m)))  # carried and not compared: refused
+        m["checks"]["ext_faithful"] = dict(EXT_FAITHFUL, differs=3, lost=1, ok=False)
+        self.assertIn("3 differ, 1 lost, 0 extra", " ".join(N.gates(m)))
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL  # deviations (scoped instances of Tengoku made global) are reported, not refused
+        self.assertEqual(N.gates(m), [])
+
+    def test_an_independent_kernel_that_did_not_accept_stops_a_release_and_none_run_does_not(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["nanoda"] = {"status": "FAILED", "declarations": None}
+        self.assertIn("nanoda", " ".join(N.gates(m)))
+        m["checks"]["nanoda"] = {"status": "ok", "declarations": 700_000}
+        self.assertEqual(N.gates(m), [])
+        self.assertEqual(N.gates(MANIFEST), [])  # it did not run: the notes say so, the release is not stopped
 
     def test_a_problem_names_what_it_is(self):
         m = copy.deepcopy(MANIFEST)
@@ -90,10 +139,63 @@ class Texts(unittest.TestCase):
             "independent kernel",
             "ATTRIBUTION.md",
             "Apache-2.0: 1, MIT: 1",
+            "3 files of 2 repositories",
+            "legal/LICENSES/",
             SHA,
         ):
             self.assertIn(needle, text)
         self.assertNotIn("Combo_All", text)
+
+    def test_the_notes_say_what_extension_entries_it_carries_or_that_it_carries_none(self):
+        without = N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        self.assertIn("constants only, no instances, simp sets, notation or tactics", without)
+        self.assertNotIn("extension entries", without)
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("1,234 instances, 2 classes, 3 structures, 4 projection functions, 11 reducibility attributes", text)
+        self.assertIn("no simp sets, notation, macros or tactics", text)
+        self.assertNotIn("constants only", text)
+        self.assertIn("refused by Lean: 0", text)
+
+    def test_the_notes_say_what_the_extension_entries_comparison_found_including_the_instances_the_other_way(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("read back by the same tool", text)
+        self.assertIn("900 entries the same, 0 differ, 0 lost, 0 extra", text)
+        self.assertIn("instances registered global, of which 7 are the other way in Tengoku ({'scoped_became_global': 7})", text)
+        self.assertIn(
+            "of Lean core's own constants, which the replay leaves alone, 1 entry differs from Tengoku's", text
+        )  # read off the real notes of the first rehearsal: "1 entries"
+        self.assertIn("and is not judged;", text)
+        m2 = copy.deepcopy(m)
+        m2["checks"]["ext_faithful"]["core"]["differs"] = 3
+        self.assertIn("3 entries differ from Tengoku's", N.notes_md(m2, "snapshot-x", "1", 100, SHA))
+        self.assertIn(
+            "**What was not checked.** An independent kernel over the layers; a prover", N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        )
+        m3 = copy.deepcopy(MANIFEST)
+        m3["checks"]["nanoda"] = {"status": "ok", "declarations": 5}
+        self.assertIn("**What was not checked.** A prover or a Leak environment", N.notes_md(m3, "snapshot-x", "1", 100, SHA))
+        no_core = copy.deepcopy(m)
+        no_core["checks"]["ext_faithful"]["core"] = (
+            None  # a comparison that did not know which constants the replay added says nothing about core's
+        )
+        self.assertNotIn("Lean core's own constants", N.notes_md(no_core, "snapshot-x", "1", 100, SHA))
+
+    def test_the_notes_say_that_an_independent_kernel_accepted_the_layers_and_then_do_not_list_it_as_unchecked(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["nanoda"] = {"status": "ok", "declarations": 700_123}
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("700,123 declarations", text)
+        self.assertIn("axiom of its type there", text)
+        self.assertNotIn("An independent kernel over the layers", text)
+        self.assertIn("What was not checked", text)
+        without = N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        self.assertIn("An independent kernel over the layers", without)
+        self.assertNotIn("nanoda", without)
 
     def test_the_attribution_lists_every_library_with_its_repository_commit_and_licence(self):
         text = N.attribution_md(MANIFEST["attribution"], "snapshot-x")

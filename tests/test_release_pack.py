@@ -1,3 +1,4 @@
+import contextlib
 import hashlib
 import io
 import json
@@ -230,6 +231,128 @@ class PackIndexes(unittest.TestCase):
             with self.assertRaises(SystemExit) as c:
                 K.verify(d / "s.tar", d / "into")
             self.assertIn("not in the manifest", str(c.exception))
+
+
+LEGAL = {
+    "ATTRIBUTION.md": b"# Where the content of this snapshot comes from\n",
+    "LICENSES/INDEX.json": b'{"files": 2, "problems": [], "sources": 1}\n',
+    "LICENSES/o/r@aaaaaaaaaaaa/LICENSE": b"MIT License\n",
+    "LICENSES/o/r@aaaaaaaaaaaa/NOTICE": b"a notice\n",
+}
+
+
+def make_legal(d: Path, tamper=None):
+    """a promotion in layers whose manifest lists the licence texts it carries; `tamper` changes the manifest or the directory after the manifest was written"""
+    make_layers(d)
+    legal = d / "legal"
+    for name, data in LEGAL.items():
+        (legal / name).parent.mkdir(parents=True, exist_ok=True)
+        (legal / name).write_bytes(data)
+    m = json.loads((d / "manifest.json").read_text())
+    m["legal"] = {"files": {n: {"bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()} for n, b in LEGAL.items()}}
+    if tamper == "unlisted":
+        (legal / "LICENSES" / "o" / "r@aaaaaaaaaaaa" / "COPYING").write_bytes(b"x")
+    if tamper == "missing":
+        m["legal"]["files"]["LICENSES/o/s@bbbbbbbbbbbb/LICENSE"] = {"bytes": 3, "sha256": "0" * 64}
+    if tamper == "hash":
+        m["legal"]["files"]["LICENSES/o/r@aaaaaaaaaaaa/LICENSE"]["sha256"] = "f" * 64
+    if tamper == "edited":
+        (legal / "LICENSES" / "o" / "r@aaaaaaaaaaaa" / "LICENSE").write_bytes(b"MIT License, with the copyright line removed\n")
+    (d / "manifest.json").write_text(json.dumps(m))
+    return legal
+
+
+class PackLegal(unittest.TestCase):
+    def roundtrip(self, tamper=None):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            legal = make_legal(d, tamper)
+            packed = K.pack(d / "o", d / "manifest.json", d / "s.tar", None, legal)
+            return packed, K.verify(d / "s.tar", d / "into")
+
+    def test_the_licence_texts_travel_inside_the_archive_and_verify(self):
+        packed, r = self.roundtrip()
+        self.assertEqual(
+            [m for m in packed["members"] if m.startswith("legal/")],
+            [
+                "legal/ATTRIBUTION.md",
+                "legal/LICENSES/INDEX.json",
+                "legal/LICENSES/o/r@aaaaaaaaaaaa/LICENSE",
+                "legal/LICENSES/o/r@aaaaaaaaaaaa/NOTICE",
+            ],
+        )
+        self.assertEqual(r["modules"], ["TengaiData/Foundation.olean", "TengaiData/Topic/Aintlib.olean"])
+
+    def test_the_same_inputs_give_the_same_bytes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            legal = make_legal(d)
+            a = K.pack(d / "o", d / "manifest.json", d / "a.tar", None, legal)
+            b = K.pack(d / "o", d / "manifest.json", d / "b.tar", None, legal)
+            self.assertEqual(a["sha256"], b["sha256"])
+
+    def test_a_licence_text_that_was_edited_after_the_manifest_was_written_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("edited")
+        self.assertIn("the legal file LICENSES/o/r@aaaaaaaaaaaa/LICENSE differs from the manifest", str(c.exception))
+
+    def test_a_hash_the_manifest_got_wrong_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("hash")
+        self.assertIn("differs from the manifest", str(c.exception))
+
+    def test_a_legal_file_the_manifest_does_not_list_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("unlisted")
+        self.assertIn("not in the manifest ['LICENSES/o/r@aaaaaaaaaaaa/COPYING']", str(c.exception))
+
+    def test_a_legal_file_the_snapshot_does_not_hold_is_refused(self):
+        with self.assertRaises(SystemExit) as c:
+            self.roundtrip("missing")
+        self.assertIn("missing ['LICENSES/o/s@bbbbbbbbbbbb/LICENSE']", str(c.exception))
+
+    def test_a_snapshot_with_licence_texts_but_a_manifest_without_them_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            legal = make_legal(d)
+            m = json.loads((d / "manifest.json").read_text())
+            del m["legal"]
+            (d / "manifest.json").write_text(json.dumps(m))
+            K.pack(d / "o", d / "manifest.json", d / "s.tar", None, legal)
+            with self.assertRaises(SystemExit) as c:
+                K.verify(d / "s.tar", d / "into")
+            self.assertIn("not in the manifest", str(c.exception))
+
+    def test_a_snapshot_without_any_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            make_layers(d)
+            packed = K.pack(d / "o", d / "manifest.json", d / "s.tar")
+            self.assertEqual([m for m in packed["members"] if m.startswith("legal/")], [])
+            K.verify(d / "s.tar", d / "into")
+
+    def test_main_takes_the_legal_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            legal = make_legal(d)
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(
+                    K.main(
+                        [
+                            "pack",
+                            "--olean-dir",
+                            str(d / "o"),
+                            "--manifest",
+                            str(d / "manifest.json"),
+                            "--out",
+                            str(d / "s.tar"),
+                            "--legal",
+                            str(legal),
+                        ]
+                    ),
+                    0,
+                )
+            self.assertIn("legal/LICENSES/INDEX.json", out.getvalue())
 
 
 if __name__ == "__main__":

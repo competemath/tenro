@@ -33,6 +33,28 @@ def gates(m: dict) -> list[str]:
         problems.append("the comparison with Tengoku's environment did not run")
     elif not faithful.get("ok"):
         problems.append(f"the comparison with Tengoku's environment found problems: {faithful.get('problems')}")
+    ext = checks.get("extensions")
+    if ext is not None and not ext.get("ok"):
+        problems.append(f"Lean refused {ext.get('failed')} extension entries the snapshot was to carry")
+    ext_faithful = checks.get("ext_faithful")
+    if ext is not None and ext_faithful is None:
+        problems.append("extension entries were put back and never compared with Tengoku's (the comparison did not run)")
+    elif ext_faithful is not None and not ext_faithful.get("ok"):
+        problems.append(
+            f"the extension entries of the snapshot differ from Tengoku's: {ext_faithful.get('differs')} differ, {ext_faithful.get('lost')} lost, {ext_faithful.get('extra')} extra"
+        )
+    legal = m.get("legal")
+    if legal is None:
+        problems.append(
+            "the snapshot carries no licence texts (legal/): MIT and Apache-2.0 want the licence and the notices to travel with copies"
+        )
+    elif legal.get("problems") is None or legal["problems"]:
+        problems.append(
+            f"{legal.get('problems') if legal.get('problems') is not None else 'an unknown number of'} sources without a licence text that stands behind the registry's licence (legal/LICENSES/INDEX.json says which)"
+        )
+    nanoda = checks.get("nanoda")
+    if nanoda is not None and nanoda.get("status") != "ok":
+        problems.append(f"the independent kernel (nanoda) did not accept the layers: {nanoda.get('status')!r}")
     attribution = m.get("attribution")
     if attribution is None:
         problems.append("the manifest has no attribution")
@@ -41,7 +63,7 @@ def gates(m: dict) -> list[str]:
     return problems
 
 
-def attribution_md(att: dict, tag: str) -> str:
+def attribution_md(att: dict, tag: str | None) -> str:
     rows = []
     for key, lib in sorted(att["libraries"].items()):
         for s in lib["sources"]:
@@ -50,8 +72,8 @@ def attribution_md(att: dict, tag: str) -> str:
             )
     licences = ", ".join(f"{k}: {v}" for k, v in sorted(att["licences"].items()))
     return (
-        f"# Where the content of `{tag}` comes from\n\n"
-        "The statements and definitions in this snapshot are taken, through [Tengoku](https://github.com/competemath/tengoku), from the libraries below, each at the commit shown. "
+        (f"# Where the content of `{tag}` comes from\n\n" if tag else "# Where the content of this snapshot comes from\n\n")
+        + "The statements and definitions in this snapshot are taken, through [Tengoku](https://github.com/competemath/tengoku), from the libraries below, each at the commit shown. "
         "Each library is under the licence shown; the licence and the notices of the library apply to its content, and the credit is the library's authors'. "
         "The tools of Tenro and Tengai that built the snapshot are Apache-2.0.\n\n"
         f"Libraries per licence: {licences}.\n\n"
@@ -68,13 +90,22 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
     cap = (checks.get("session_load") or {}).get("cap")
     f = checks["faithful"]
     att = m["attribution"]
+    ext = checks.get("extensions")
+    carries = (
+        "It carries the constants and, from Tengoku, the extension entries Lean keeps about them "
+        f"({ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, {ext['reducibility']:,} reducibility attributes; `tengai-replay --ext`), "
+        "and no simp sets, notation, macros or tactics."
+        if ext
+        else "It carries constants only, no instances, simp sets, notation or tactics."
+    )
     lines = [
         f"# {tag}: Tengoku's statements as a layered snapshot (experimental)",
         "",
         f"**What it is.** {t['theorems']:,} theorem statements of {len(m['libraries'])} libraries, as a foundation and one layer per library of built `.olean` files "
         f"({t['olean_bytes'] / 1e9:.2f} GB; {archive_bytes / 1e6:,.0f} MB as the archive below). A theorem stands as an **axiom of its type**: its proof is not in it, except the proofs a definition computes through. "
         "It is a base for search and for applying statements, not a proof library: a result found in it must be checked in an environment that has the real proofs (invariant I1, untrusted search and trusted checking). "
-        "It carries constants only, no instances, simp sets, notation or tactics. It is Tengoku **at the pin** named below, and it is **experimental**: no version promise, no stability, not a v1.",
+        + carries
+        + " It is Tengoku **at the pin** named below, and it is **experimental**: no version promise, no stability, not a v1.",
         "",
         "**What was checked.**",
         f"- the kernel accepted every declaration of every layer ({t.get('refused', 0)} refused of {t['constants_added']:,} constants added);",
@@ -82,13 +113,37 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         f"{f['statement_stubs']:,} theorems stand as axioms of their type, {f['kept_with_value']:,} are kept with their proof, {f['same_with_value'] + f['same_without_value']:,} definitions and other declarations agree, "
         f"{f['refused_and_stubbed']:,} were stubbed after a refusal; problems: {f['problems'] or 'none'}. The hash is Lean's 32 bits: a difference is certain, an agreement makes one very unlikely and is not a proof;",
     ]
+    nanoda = checks.get("nanoda")
+    if nanoda:
+        lines.append(
+            f"- **an independent kernel** (nanoda, which shares no code with Lean) accepted the layers read back out of their `.olean` files and exported again: {nanoda['declarations']:,} declarations. "
+            "A theorem stands as an axiom of its type there, so what it checks is every other declaration (the definitions, the inductive types, Lean core's) given those statements;"
+        )
+    if ext:
+        lines.append(
+            f"- extension entries put back in {ext['layers']} layers: {ext['instances']:,} instances, {ext['classes']:,} classes, {ext['structures']:,} structures, {ext['projections']:,} projection functions, "
+            f"{ext['reducibility']:,} reducibility attributes; refused by Lean: {ext['failed']};"
+        )
+        ef = checks.get("ext_faithful")
+        if ef:
+            lines.append(
+                f"- **the extension entries read back by the same tool** (`tengai-extinfo`) in Tengoku's environment and in the snapshot's: {ef['same']:,} entries the same, {ef['differs']:,} differ, {ef['lost']:,} lost, {ef['extra']:,} extra; "
+                f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'})"
+                + (
+                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} {'entry differs' if ef['core']['differs'] == 1 else 'entries differ'} from Tengoku's (a library changed what core says about them) and {'is' if ef['core']['differs'] == 1 else 'are'} not judged;"
+                    if ef.get("core")
+                    else ";"
+                )
+            )
     if worst and cap:
         lines.append(
             f"- every session (the foundation and one library) over an empty module, paired medians: the slowest is {worst[0]} at +{worst[1]['net_median']:.3f} s; the cap is {cap} s;"
         )
     lines += [
         "",
-        "**What was not checked.** An independent kernel over the layers; a prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
+        "**What was not checked.** "
+        + ("A" if nanoda else "An independent kernel over the layers; a")
+        + " prover or a Leak environment on it; it holds the statements the libraries' statements reach, not the seed's (Mathlib's) other lemmas.",
         "",
         "**Made from.** " + ", ".join(f"{k} `{v}`" for k, v in sorted(pins.items())) + f" (workflow run {run}).",
         "",
@@ -100,7 +155,8 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         "```",
         "`indexes/layers.jsonl` in the archive says which layer holds each theorem. docs/consuming.md of Tenro says the rest.",
         "",
-        f"**Where the content comes from.** {len(att['libraries'])} libraries, each at a commit and under a licence ({', '.join(f'{k}: {v}' for k, v in sorted(att['licences'].items()))}): see `ATTRIBUTION.md`.",
+        f"**Where the content comes from.** {len(att['libraries'])} libraries, each at a commit and under a licence ({', '.join(f'{k}: {v}' for k, v in sorted(att['licences'].items()))}): see `ATTRIBUTION.md`. "
+        f"Each library's licence text and notices, as its repository holds them at that commit ({m['legal']['licence_files']:,} files of {m['legal']['sources']:,} repositories), are in the archive under `legal/LICENSES/`, and they apply to its content.",
         "",
         f"Layers: {len(layers)}. Archive sha256 `{archive_sha256}`.",
     ]

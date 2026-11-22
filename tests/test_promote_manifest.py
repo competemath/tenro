@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -273,6 +275,104 @@ class ManifestLayers(unittest.TestCase):
             )
             self.assertNotIn("cap", m["checks"]["session_load"])  # a promotion measured before the cap was recorded has none
             self.assertTrue(m["checks"]["axioms"]["standard_only"])
+
+    def test_the_extension_entries_are_summed_over_the_layers_that_carried_them_and_an_entry_lean_refused_is_not_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            self.assertEqual(
+                m["checks"]["extensions"],
+                {"layers": 2, "reducibility": 0, "projections": 0, "structures": 0, "classes": 0, "instances": 4, "failed": 0, "ok": True},
+            )
+            (d / "layer-stats.jsonl").write_text(
+                json.dumps({"ext": {"instances": 3, "classes": 2, "failed": 0}, "replay": {"added": 9, "skipped": 3}})
+                + "\n"
+                + json.dumps({"ext": {"reducibility": 7, "failed": 2}, "replay": {"added": 5, "skipped": 0}})
+                + "\n"
+            )
+            e = M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["extensions"]
+            self.assertEqual((e["instances"], e["classes"], e["reducibility"], e["failed"], e["ok"]), (3, 2, 7, 2, False))
+            (d / "layer-stats.jsonl").write_text(
+                json.dumps({"ext": None, "replay": {"added": 9}}) + "\n" + json.dumps({"ext": None, "replay": {"added": 5}}) + "\n"
+            )
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["extensions"]
+            )  # no layer carried any: null, not zero
+
+    def test_the_licence_texts_are_recorded_with_their_hashes_and_what_the_writer_found_and_absent_means_absent(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            legal = d / "legal"
+            (legal / "LICENSES" / "o").mkdir(parents=True)
+            (legal / "ATTRIBUTION.md").write_text("# a\n")
+            (legal / "LICENSES" / "o" / "LICENSE").write_text("MIT\n")
+            (legal / "LICENSES" / "INDEX.json").write_text(json.dumps({"sources": 3, "files": 5, "problems": [{"repo": "x"}]}))
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)
+            self.assertEqual(sorted(m["legal"]["files"]), ["ATTRIBUTION.md", "LICENSES/INDEX.json", "LICENSES/o/LICENSE"])
+            self.assertEqual(m["legal"]["files"]["LICENSES/o/LICENSE"]["bytes"], 4)
+            self.assertEqual((m["legal"]["sources"], m["legal"]["licence_files"], m["legal"]["problems"]), (3, 5, 1))
+            self.assertNotIn(
+                "legal", M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            )  # none given: none recorded, never an empty record
+            (legal / "LICENSES" / "INDEX.json").write_text(json.dumps({"sources": 3, "files": 5, "problems": []}))
+            self.assertEqual(M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)["legal"]["problems"], 0)
+            (legal / "LICENSES" / "INDEX.json").unlink()
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)["legal"]["problems"]
+            )  # an index that is not there says nothing: not zero
+
+    def test_the_extension_comparison_is_recorded_when_it_ran_and_null_when_it_did_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertIsNone(M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["ext_faithful"])
+            report = {
+                "instances": "global",
+                "totals": {"same": 10, "differs": 1, "lost": 2, "extra": 0, "deviation": 3},
+                "deviations": {"scoped_became_global": 3},
+                "core": {"constants": 5, "same": 9, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
+                "ok": False,
+                "examples": {"lost": [{"name": "x"}]},
+            }
+            (d / "ext-faithful.json").write_text(json.dumps(report))
+            got = M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["ext_faithful"]
+            self.assertEqual(
+                got,
+                {
+                    "instances": "global",
+                    "same": 10,
+                    "differs": 1,
+                    "lost": 2,
+                    "extra": 0,
+                    "deviation": 3,
+                    "deviations": {"scoped_became_global": 3},
+                    "core": {"constants": 5, "same": 9, "differs": 1, "lost": 0, "extra": 0, "deviation": 0},
+                    "ok": False,
+                },
+            )
+
+    def test_main_takes_the_legal_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "legal").mkdir()
+            (d / "legal" / "ATTRIBUTION.md").write_text("# a\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    M.main_layers(
+                        ["--dir", str(d), "--layered", str(d / "layered"), "--out", str(d / "m.json"), "--legal", str(d / "legal")]
+                    ),
+                    0,
+                )
+            self.assertEqual(list(json.loads((d / "m.json").read_text())["legal"]["files"]), ["ATTRIBUTION.md"])
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "empty").mkdir()
+            with self.assertRaises(SystemExit):
+                M.build_layers(d, d / "layered", {}, legal=d / "empty")
 
     def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
         with tempfile.TemporaryDirectory() as d:

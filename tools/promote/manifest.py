@@ -141,7 +141,24 @@ def index_record(indexes: Path) -> dict:
     return rec
 
 
-def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None, flavor: str | None = None) -> dict:
+def legal_record(legal: Path) -> dict:
+    """the licence texts and notices a snapshot carries (`tools/release/licences.py`): every file with its size and sha256 (relative to the directory, `/`-separated), and what the writer found: how many sources
+    (a repository at a commit), how many licence and notice files, and the sources without a text that stands behind the registry's licence (`problems`)"""
+    files = sorted(p for p in legal.rglob("*") if p.is_file())
+    if not files:
+        raise SystemExit(f"manifest: {legal} holds no file")
+    index = read_json(legal / "LICENSES" / "INDEX.json") or {}
+    return {
+        "files": {p.relative_to(legal).as_posix(): sha256_and_sizes(p) for p in files},
+        "sources": index.get("sources"),
+        "licence_files": index.get("files"),
+        "problems": len(index["problems"]) if "problems" in index else None,
+    }
+
+
+def build_layers(
+    d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None, flavor: str | None = None, legal: Path | None = None
+) -> dict:
     """the record of a promotion in layers (schema 2): every layer with what it imports, what it holds, what its replay added and the hash and size of its olean; the checks of the whole (independent kernel over all
     the layers, statement ids, axioms, what a session loads). A layer whose file is missing is an error, a check that did not run is null."""
     plan = json.loads((d / "layers" / "layers.json").read_text(encoding="utf-8"))
@@ -183,13 +200,30 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
     load = read_json(d / "layers-load.json")
     faithful = read_json(d / "faithful.json")
     attribution = read_json(d / "attribution.json")
+    ext_faithful = read_json(d / "ext-faithful.json")
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
+    ext_counts = [x["extensions"] for x in layers if x["extensions"]]
+    extensions = (
+        None
+        if not ext_counts
+        else {
+            "layers": len(ext_counts),
+            **{
+                k: sum(e.get(k, 0) for e in ext_counts)
+                for k in ("reducibility", "projections", "structures", "classes", "instances", "failed")
+            },
+        }
+    )
+    if extensions:
+        extensions["ok"] = extensions["failed"] == 0  # an entry Lean refused is counted, never hidden
     return {
         "schema": 2,
         **({"flavor": flavor} if flavor else {}),
         # where the content comes from: per library the repository, the commit and the licence (tools/promote/attribution.py)
         **({"attribution": attribution} if attribution is not None else {}),
         **({"indexes": index_record(indexes)} if indexes is not None else {}),
+        # the licence texts and notices of the libraries, packed with the snapshot under legal/ (tools/release/licences.py)
+        **({"legal": legal_record(legal)} if legal is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
         # a statements snapshot has hundreds of thousands of theorems: the table of which layer holds which is the layers index (tools/promote/layer_index.py), not a list in the manifest
@@ -208,6 +242,19 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
         },
         "checks": {
             "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
+            # the extension entries carried back from Tengoku (tengai-replay --ext: reducibility, projections, structures, classes, instances) summed over the layers that carried them: null when no layer did
+            "extensions": extensions,
+            # the same rows read by the same tool in Tengoku's environment and in the snapshot's (tools/promote/ext_compare.py): null when it did not run
+            "ext_faithful": None
+            if ext_faithful is None
+            else {
+                "instances": ext_faithful["instances"],
+                **{k: ext_faithful["totals"][k] for k in ("same", "differs", "lost", "extra", "deviation")},
+                "deviations": ext_faithful["deviations"],
+                # Lean core's own constants (the replay leaves them alone): compared, reported, never judged; null when the comparison did not know which constants the replay added
+                "core": ext_faithful.get("core"),
+                "ok": ext_faithful["ok"],
+            },
             "nanoda": {"status": status, "declarations": int(declared[-1]) if declared else None} if status else None,
             "statement_ids": None
             if ids is None
@@ -269,12 +316,23 @@ def main_layers(argv: list[str]) -> int:
         help="the directory of the retrieval indexes (build.py and intent.py wrote it): recorded with its hashes, packed with the snapshot",
     )
     ap.add_argument(
+        "--legal",
+        help="the directory of the licence texts and notices (licences.py wrote it): recorded with its hashes, packed with the snapshot under legal/",
+    )
+    ap.add_argument(
         "--flavor",
         choices=["statements"],
         help="a snapshot of the statements flavor (docs/statements.md): recorded, and the declarations the kernel refused are counted",
     )
     a = ap.parse_args(argv)
-    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None, a.flavor)
+    m = build_layers(
+        Path(a.dir),
+        Path(a.layered),
+        dict(p.split("=", 1) for p in a.pin),
+        Path(a.indexes) if a.indexes else None,
+        a.flavor,
+        Path(a.legal) if a.legal else None,
+    )
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(json.dumps(m, indent=1, sort_keys=True) + "\n")
     print(

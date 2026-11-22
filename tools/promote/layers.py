@@ -18,7 +18,8 @@ A constant is used by at least the topics that use anything depending on it, so 
 for every constant, not assumed. An inductive type with its constructors and recursors is one unit (the kernel derives the recursors with the type): its users are the union over its members, and `--only`
 names it by its first type. `--added` is the list of names a one-module replay added (what Lean core did not already hold): only those are placed, so core constants are left to `Init`.
 
-Writes DIR/<layer>.names.jsonl (one JSON array of name components a line, the input of `--only`) and DIR/layers.json (the layers in the order they must be replayed, what each imports, and the sizes).
+Writes DIR/<layer>.names.jsonl (one JSON array of name components a line, the input of `--only`: the first name of every unit), DIR/<layer>.constants.jsonl (the same, every constant of the layer: the constructors
+and the recursors of an inductive block as well, which is what the extension entries and the binder annotations are read for) and DIR/layers.json (the layers in the order they must be replayed, what each imports, and the sizes).
 """
 
 from __future__ import annotations
@@ -230,10 +231,14 @@ def plan(
     topic_of = {p: t for t, p in paths.items()}
     out_layers: list[dict] = []
     names_out: dict[str, list[list]] = {}
+    constants_out: dict[str, list[list]] = {}
     for node in nodes:
         units = sorted(by_node[node], key=lambda u: ex.name(u))
         module = node_module[node]
         names_out[module] = [ex.components(u) for u in units]
+        constants_out[module] = [
+            ex.components(c) for u in units for c in ex.members[u]
+        ]  # every constant: the constructors and recursors of an inductive block too
         above = [
             node_module[node[:k]] for k in range(len(node)) if node[:k] in by_node
         ]  # the layers above that exist, the foundation first
@@ -245,6 +250,7 @@ def plan(
             "constants": sum(len(ex.members[u]) for u in units),
             "terms": sum(ex.unit_terms[u] for u in units),
             "file": f"{module}.names.jsonl",
+            "constants_file": f"{module}.constants.jsonl",
         }
         if node in groups:
             layer["group"] = "/".join(node)
@@ -291,6 +297,7 @@ def plan(
             "kinds": dict(sorted(Counter(ex.decl_kind[u] for u in layer_of).items())),  # the units by the kind of their first constant
         },
         "names": names_out,
+        "constants": constants_out,
     }
 
 
@@ -310,6 +317,10 @@ def main(argv: list[str] | None = None) -> int:
     a.out.mkdir(parents=True, exist_ok=True)
     for module, names in p.pop("names").items():
         (a.out / f"{module}.names.jsonl").write_text("".join(json.dumps(n, ensure_ascii=False) + "\n" for n in names), encoding="utf-8")
+    for module, constants in p.pop("constants").items():
+        (a.out / f"{module}.constants.jsonl").write_text(
+            "".join(json.dumps(n, ensure_ascii=False) + "\n" for n in constants), encoding="utf-8"
+        )
     (a.out / "layers.json").write_text(json.dumps(p, indent=1, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
     t = p["totals"]
     print(
