@@ -268,3 +268,90 @@ def test_every_layer_says_which_constants_it_added_and_the_comparison_judges_onl
     run = ext_compare_step()["run"]
     assert 'cat "$RUNNER_TEMP"/added/*.jsonl > "$RUNNER_TEMP/added-all.jsonl"' in run
     assert '--added "$RUNNER_TEMP/added-all.jsonl"' in run
+
+
+def roots_step():
+    found = [s for s in JOB if "tree_roots.py" in s.get("run", "") and "--roots-out" in s["run"]]
+    assert len(found) == 1, "exactly one step makes the roots of the tree"
+    return found[0]
+
+
+def test_leaving_libraries_out_is_an_input_that_defaults_to_the_whole_tree():
+    data = yaml.safe_load(WORKFLOW.read_text())
+    triggers = data.get("on") or data.get(True)
+    assert triggers["workflow_dispatch"]["inputs"]["exclude_libraries"]["default"] == ""
+    assert "inputs.exclude_libraries" in WORKFLOW.read_text()
+
+
+def test_the_roots_are_made_after_tengoku_is_set_up_and_before_anything_reads_the_tree():
+    names = [s.get("name", "") for s in JOB]
+    setup = next(i for i, n in enumerate(names) if n.startswith("Tengoku at the pin"))
+    roots = JOB.index(roots_step())
+    assert setup < roots
+    tree = next(i for i, n in enumerate(names) if n.startswith("The whole tree as the sample (sample_mode=tree)"))
+    assert roots < tree
+    run = roots_step()["run"]
+    assert '--roots-out "$RUNNER_TEMP/tree-roots.txt"' in run and '--report "$RUNNER_TEMP/tree-roots.json"' in run
+    assert roots_step()["if"] == "env.EXPORT_RUN == ''", "a replay of an earlier export has no Tengoku"
+
+
+def test_a_name_that_is_not_a_module_and_a_combination_that_would_export_the_whole_tree_anyway_are_refused():
+    run = roots_step()["run"]
+    assert '[[ "$m" =~ ^[A-Za-z0-9_.]+$ ]]' in run, "a module name only"
+    assert '"$SAMPLE_MODE" != tree' in run and "exit 1" in run, "the manifests sample does not read the roots"
+    assert '"$TREE" = true' in run, "the probe of the whole tree would export the libraries that were to be left out"
+
+
+def test_no_step_imports_the_aggregate_by_name_any_more_the_roots_are_the_aggregate_or_the_kept_libraries():
+    users = [(s.get("name", "?"), s["run"]) for s in JOB if "run" in s and '"${roots[@]}"' in s["run"]]
+    assert len(users) == 3, [n for n, _ in users]  # the tree step (the listing and the export), the source hashes, the extension rows
+    for name, run in users:
+        assert 'mapfile -t roots < "$RUNNER_TEMP/tree-roots.txt"' in run, (
+            f"{name!r} uses roots without reading them: a shell step does not see another step's array"
+        )
+        assert "Tengoku.All" not in run.replace("# Tengoku.All,", ""), f"{name!r} still names the aggregate"
+
+
+def test_the_report_travels_with_the_export_and_a_replay_reads_it_back():
+    copies = [r for _, r in runs() if "tree-roots.json" in r and "kept/$f" in r]
+    assert len(copies) == 2, "kept into the artifact, and read back by a replay"
+    small = [
+        s for s in JOB if "upload-artifact" in s.get("uses", "") and str(s.get("with", {}).get("name", "")).startswith("export-statements")
+    ]
+    assert "tree-roots.json" in small[0]["with"]["path"]
+
+
+def test_a_snapshot_made_without_libraries_pins_them_and_one_made_of_the_whole_tree_has_no_such_pin():
+    manifest = [r for _, r in runs() if "manifest.py layers" in r]
+    assert len(manifest) == 1
+    run = manifest[0]
+    assert 'excluded_args=(--pin "excluded_libraries=$excluded")' in run and 'if [ -n "$excluded" ]' in run
+    assert '"${excluded_args[@]}"' in run.split("manifest.py layers", 1)[1], "the pin reaches the manifest"
+    assert "excluded_args=()" in run, "an empty array when nothing was left out: the manifest is the one it always was"
+
+
+def test_the_tree_step_checks_the_environment_of_the_kept_roots_before_it_exports():
+    step = next(s for s in JOB if s.get("name", "").startswith("The whole tree as the sample (sample_mode=tree)"))
+    run = step["run"]
+    assert '--modules-out "$RUNNER_TEMP/env-modules.txt"' in run, "Lean writes the modules of the environment it imported"
+    check = run.index('tree_roots.py --check-modules "$RUNNER_TEMP/env-modules.txt" --report "$RUNNER_TEMP/tree-roots.json"')
+    export = run.index("lean4export")
+    assert check < export, "a leak is found before the 25-minute export, not after it"
+
+
+def test_the_attribution_does_not_name_a_library_that_was_left_out_at_export_time_and_at_replay_time():
+    users = [(n, r) for n, r in runs() if "attribution.py --filter" in r]
+    assert len(users) == 2, "the export makes it from the intake and filters it; a replay of an earlier export filters what it downloaded"
+    for name, run in users:
+        assert (
+            '--filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json"'
+            in run
+        ), name
+        assert '[ -s "$RUNNER_TEMP/tree-roots.json" ]' in run, (
+            f"{name!r}: no report (an export of the whole tree, or of before the report existed) is no filter"
+        )
+    export = next(r for n, r in users if n.startswith("Attribution"))
+    assert export.index("--intake") < export.index("attribution.py --filter"), "filtered after it is made"
+    assert '"$SAMPLE_MODE" = tree' in export
+    replay = next(r for n, r in users if n.startswith("The export of an earlier run"))
+    assert replay.index("for f in names.txt") < replay.index("attribution.py --filter"), "filtered after the kept files are copied back"

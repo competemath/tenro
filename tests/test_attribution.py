@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -102,6 +103,100 @@ class Command(unittest.TestCase):
             report = json.loads((root / "a.json").read_text())
         self.assertEqual(sorted(report["libraries"]), ["alpha", "gamma"])
         self.assertIn("UNKNOWN for 1", out.getvalue())
+
+
+class Filter(unittest.TestCase):
+    """a whole-tree export that leaves libraries out holds none of their content: the attribution must not name them (the first real one still did, and a library without a licence text would have blocked the release for content that is not there)"""
+
+    def attribution(self):
+        with tempfile.TemporaryDirectory() as d:
+            return A.build(intake(Path(d)), LICENCES)
+
+    def report(self, *roots):
+        return {"excluded": [{"root": r, "why": "requested"} for r in roots]}
+
+    def test_a_root_is_the_registry_library_of_the_same_name_without_hyphens_and_case(self):
+        att, gone, unmatched = A.drop_excluded(self.attribution(), self.report("Tengoku.Alpha"))
+        self.assertEqual((sorted(att["libraries"]), gone, unmatched), (["beta", "gamma"], ["alpha"], []))
+
+    def test_the_counts_and_the_unknown_list_are_made_again(self):
+        before = self.attribution()
+        self.assertEqual((before["licences"], before["unknown"]), ({"Apache-2.0": 1, "MIT": 1}, ["gamma"]))
+        att, _, _ = A.drop_excluded(before, self.report("Tengoku.Gamma"))
+        self.assertEqual(
+            (att["licences"], att["unknown"]), ({"Apache-2.0": 1, "MIT": 1}, [])
+        )  # the library without a licence is no longer named: nothing blocks for it
+        att, _, _ = A.drop_excluded(before, self.report("Tengoku.Alpha"))
+        self.assertEqual((att["licences"], att["unknown"]), ({"MIT": 1}, ["gamma"]))
+
+    def test_names_are_compared_without_hyphens_underscores_and_case(self):
+        att = {
+            "libraries": {"lana-belyi": {"sources": [], "records": 1}, "keep_me": {"sources": [], "records": 1}},
+            "licences": {},
+            "unknown": ["lana-belyi", "keep_me"],
+        }
+        out, gone, _ = A.drop_excluded(att, self.report("Tengoku.LanaBelyi"))
+        self.assertEqual((list(out["libraries"]), gone, out["unknown"]), (["keep_me"], ["lana-belyi"], ["keep_me"]))
+
+    def test_two_libraries_with_one_name_are_an_error_not_a_guess(self):
+        att = {"libraries": {"a-b": {"sources": [], "records": 1}, "ab": {"sources": [], "records": 1}}, "licences": {}, "unknown": []}
+        with self.assertRaisesRegex(SystemExit, "cannot be told from what was kept"):
+            A.drop_excluded(att, self.report("Tengoku.Ab"))
+
+    def test_a_root_that_matches_no_library_is_reported_and_dropping_twice_changes_nothing(self):
+        once, gone, unmatched = A.drop_excluded(self.attribution(), self.report("Tengoku.Alpha", "Tengoku.Nothing"))
+        self.assertEqual((gone, unmatched), (["alpha"], ["Tengoku.Nothing"]))
+        twice, gone2, unmatched2 = A.drop_excluded(once, self.report("Tengoku.Alpha", "Tengoku.Nothing"))
+        self.assertEqual((twice, gone2, unmatched2), (once, [], ["Tengoku.Alpha", "Tengoku.Nothing"]))
+
+    def test_nothing_left_out_leaves_the_attribution_as_it_was(self):
+        before = self.attribution()
+        att, gone, unmatched = A.drop_excluded(before, {"excluded": []})
+        self.assertEqual((att, gone, unmatched), (before, [], []))
+
+    def test_the_real_names_of_the_eight_libraries_of_the_first_run_each_match_one_registry_library(self):
+        roots = [
+            "LanaBelyi",
+            "LanaFormalSchemes",
+            "LanaGenl",
+            "LanaHeights",
+            "LanaOka",
+            "LanaOrbicurveCores",
+            "LanaTateCurvesTheta",
+            "LanaTemperedFundamentalGroups",
+        ]
+        registry = {"lana-" + "-".join(w.lower() for w in re.findall("[A-Z][a-z]+", r)[1:]): {"sources": [], "records": 1} for r in roots}
+        registry.update(
+            {
+                "lana-iut": {"sources": [], "records": 1},
+                "lana-pi1": {"sources": [], "records": 1},
+                "lana-elliptic-curves": {"sources": [], "records": 1},
+            }
+        )
+        out, gone, unmatched = A.drop_excluded(
+            {"libraries": registry, "licences": {}, "unknown": []}, self.report(*("Tengoku." + r for r in roots))
+        )
+        self.assertEqual(sorted(out["libraries"]), ["lana-elliptic-curves", "lana-iut", "lana-pi1"])
+        self.assertEqual((len(gone), unmatched), (8, []))
+
+    def test_main_filters_a_file_in_place_and_says_what_it_left_out(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a.json").write_text(json.dumps(self.attribution()))
+            (root / "r.json").write_text(json.dumps(self.report("Tengoku.Beta")))
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(
+                    A.main(["--filter", str(root / "a.json"), "--exclude-report", str(root / "r.json"), "--out", str(root / "a.json")]), 0
+                )
+            att = json.loads((root / "a.json").read_text())
+        self.assertEqual(sorted(att["libraries"]), ["alpha", "gamma"])
+        self.assertIn("1 libraries left out (beta), 2 remain", out.getvalue())
+
+    def test_the_filter_needs_the_report_and_the_build_needs_the_intake(self):
+        for args in (["--filter", "x.json", "--out", "y.json"], ["--out", "y.json"]):
+            with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+                A.main(args)
 
 
 if __name__ == "__main__":

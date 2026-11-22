@@ -11,6 +11,10 @@ on:
         description: "Modules to import and export whole, separated by spaces (a tree: Tengoku.All)"
         required: true
         default: "Tengoku.All"
+      exclude_libraries:
+        description: "With sample_mode=tree: root modules of libraries to leave out of the export, separated by spaces (Tengoku.LanaBelyi Tengoku.LanaGenl), and with them every library that imports one (tools/promote/tree_roots.py says which, and why, in the log and in tree-roots.json). Empty (the default): the whole tree, Tengoku.All"
+        required: false
+        default: ""
       wide_sample:
         description: "Also export a sample of the intake theorems as statements (by default the wide sample of the transplant runs: 16 libraries, 4,800 theorems, seed wide-2), for a size to set against the snapshot of the same roots: true or false"
         required: true
@@ -96,6 +100,7 @@ defaults:
     shell: bash
 env:
   MODULES: ${{ inputs.modules }}
+  EXCLUDE_LIBRARIES: ${{ inputs.exclude_libraries }}
   REPLAY: ${{ inputs.replay }}
   LAYERS: ${{ inputs.layers }}
   KEEP_EXPORT: ${{ inputs.keep_export }}
@@ -174,6 +179,13 @@ jobs:
       - name: Tengoku at the pin, with its compiled cache
         if: env.EXPORT_RUN == ''
         run: scripts/tengoku-setup.sh
+      - name: "The roots of the tree: Tengoku.All, or every library but the ones left out (exclude_libraries) and the libraries that import them"
+        if: env.EXPORT_RUN == ''
+        run: |
+          for m in $EXCLUDE_LIBRARIES; do [[ "$m" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "bad library $m"; exit 1; }; done
+          if [ -n "$EXCLUDE_LIBRARIES" ] && [ "$SAMPLE_MODE" != tree ]; then echo "::error::exclude_libraries leaves libraries out of the whole-tree export: it needs sample_mode=tree"; exit 1; fi
+          if [ -n "$EXCLUDE_LIBRARIES" ] && [ "$TREE" = true ]; then echo "::error::tree=true also exports the whole tree, with the libraries that were to be left out: set tree=false"; exit 1; fi
+          python3 tools/promote/tree_roots.py --tree .tengoku --exclude "$EXCLUDE_LIBRARIES" --roots-out "$RUNNER_TEMP/tree-roots.txt" --report "$RUNNER_TEMP/tree-roots.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The export of an earlier run (export_run), downloaded: no Tengoku, no export"
         if: env.EXPORT_RUN != ''
         run: |
@@ -184,9 +196,13 @@ jobs:
           made="$(cat "$RUNNER_TEMP/kept/drop-proofs.txt" 2>/dev/null || echo false)"
           [ "$made" = "${DROP_PROOFS:-false}" ] || { echo "::error::the export of run $EXPORT_RUN was made with drop_proofs=$made, this run says drop_proofs=${DROP_PROOFS:-false}"; exit 1; }
           zstd -d -q "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst" -o "$RUNNER_TEMP/sample-stmt.ndjson"
-          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json; do
+          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json tree-roots.json; do
             if [ -f "$RUNNER_TEMP/kept/$f" ]; then cp "$RUNNER_TEMP/kept/$f" "$RUNNER_TEMP/$f"; fi
           done
+          # the libraries the export left out are not named in the attribution (an export made before the filter existed names them; dropping twice changes nothing)
+          if [ -s "$RUNNER_TEMP/attribution.json" ] && [ -s "$RUNNER_TEMP/tree-roots.json" ]; then
+            python3 tools/promote/attribution.py --filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
           if [ -f "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" -o "$RUNNER_TEMP/source-hashes.jsonl"; fi
           if [ -f "$RUNNER_TEMP/kept/ext.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/ext.jsonl.zst" -o "$RUNNER_TEMP/ext.jsonl"; fi
@@ -213,13 +229,16 @@ jobs:
         if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == '' && env.SAMPLE_MODE == 'tree'
         run: |
           [[ "$SEED_DEPTH" =~ ^[1-9]$ ]] || { echo "bad seed_depth"; exit 1; }
-          (cd .tengoku && lake env lean --run "$GITHUB_WORKSPACE/tools/promote/Modules.lean" --prefix Tengoku Tengoku.All) > "$RUNNER_TEMP/modules.jsonl" 2> "$RUNNER_TEMP/modules.err"
+          mapfile -t roots < "$RUNNER_TEMP/tree-roots.txt"   # Tengoku.All, or the roots that are kept
+          (cd .tengoku && lake env lean --run "$GITHUB_WORKSPACE/tools/promote/Modules.lean" --modules-out "$RUNNER_TEMP/env-modules.txt" --prefix Tengoku "${roots[@]}") > "$RUNNER_TEMP/modules.jsonl" 2> "$RUNNER_TEMP/modules.err"
           tail -1 "$RUNNER_TEMP/modules.err"
           [ -s "$RUNNER_TEMP/modules.jsonl" ] || { echo "no theorem listed"; exit 1; }
+          # the second reading of what was left out, from Lean's own import of the kept roots: no module of a library that was left out may be in the environment (before the export, which is the expensive part)
+          python3 tools/promote/tree_roots.py --check-modules "$RUNNER_TEMP/env-modules.txt" --report "$RUNNER_TEMP/tree-roots.json" | tee -a "$GITHUB_STEP_SUMMARY"
           python3 tools/promote/tree_topics.py "$RUNNER_TEMP/modules.jsonl" --out "$RUNNER_TEMP/topics.json" --sample-out "$RUNNER_TEMP/sample.jsonl" --seed-depth "$SEED_DEPTH" | tee -a "$GITHUB_STEP_SUMMARY"
           drop=(); if [ "$DROP_PROOFS" = true ]; then drop=(--drop-proofs); fi
           cd .tengoku
-          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" Tengoku.All --statements "${drop[@]}" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
+          /usr/bin/time -v lake env "$RUNNER_TEMP/lean4export/.lake/build/bin/lean4export" "${roots[@]}" --statements "${drop[@]}" > "$RUNNER_TEMP/sample-stmt.ndjson" 2> "$RUNNER_TEMP/sample-stmt.err" || { head -40 "$RUNNER_TEMP/sample-stmt.err"; exit 1; }
           grep -E "^lean4export --statements: " "$RUNNER_TEMP/sample-stmt.err" | tee -a "$GITHUB_STEP_SUMMARY" || true
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/sample-stmt.err" || true
           cd "$GITHUB_WORKSPACE"
@@ -245,6 +264,10 @@ jobs:
           sample_args=(--sample "$RUNNER_TEMP/sample.jsonl")
           if [ "$SAMPLE_MODE" = tree ]; then sample_args=(); fi   # the topics of a tree are not the libraries' keys: every library of the intake is listed
           python3 tools/promote/attribution.py --intake .tengoku/data/intake --sources .tengoku/schemas/sources.json "${sample_args[@]}" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          # a snapshot that leaves libraries out holds none of their content: the attribution (and with it the licence texts, the notes and the gate) must not name them either
+          if [ "$SAMPLE_MODE" = tree ] && [ -s "$RUNNER_TEMP/tree-roots.json" ]; then
+            python3 tools/promote/attribution.py --filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
         if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
         continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe
@@ -495,7 +518,10 @@ jobs:
           echo "pins: tenro $src_sha, Tengoku $tengoku_pin, exporter patch $patch_sha, tengai $tengai_tag"
           python3 tools/promote/layer_index.py --layers "$RUNNER_TEMP/layers" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/indexes" | tee -a "$GITHUB_STEP_SUMMARY"
           legal_args=(); if [ -s "$RUNNER_TEMP/legal/LICENSES/INDEX.json" ]; then legal_args=(--legal "$RUNNER_TEMP/legal"); fi
-          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" "${legal_args[@]}" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "scoped_instances=${SCOPED_INSTANCES:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
+          # a snapshot made without some libraries says so in its pins (the release notes print them); one made of the whole tree has no such pin, so its manifest is the one it always was
+          excluded="$(python3 -c 'import json,os; p=os.environ["RUNNER_TEMP"] + "/tree-roots.json"; d=json.load(open(p)) if os.path.exists(p) else {}; print(",".join(e["root"] for e in d.get("excluded", [])))')"
+          excluded_args=(); if [ -n "$excluded" ]; then excluded_args=(--pin "excluded_libraries=$excluded"); fi
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" "${legal_args[@]}" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "scoped_instances=${SCOPED_INSTANCES:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}" "${excluded_args[@]}"
           # the export and the parsed tables are not needed any more (the runner's disk)
           rm -f "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/tables.olean"
           python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" "${legal_args[@]}" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
@@ -572,8 +598,9 @@ jobs:
           (cd core && lake build tengai-typeinfo 2>&1 | tail -3)
           cat "$RUNNER_TEMP"/layers/*.names.jsonl > "$RUNNER_TEMP/all-names.jsonl"
           wc -l "$RUNNER_TEMP/all-names.jsonl"
+          mapfile -t roots < "$RUNNER_TEMP/tree-roots.txt"
           cd .tengoku
-          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-typeinfo" --hashes "$RUNNER_TEMP/all-names.jsonl" Tengoku.All > "$RUNNER_TEMP/source-hashes.jsonl" 2> "$RUNNER_TEMP/source-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/source-hashes-time.txt"; exit 1; }
+          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-typeinfo" --hashes "$RUNNER_TEMP/all-names.jsonl" "${roots[@]}" > "$RUNNER_TEMP/source-hashes.jsonl" 2> "$RUNNER_TEMP/source-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/source-hashes-time.txt"; exit 1; }
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/source-hashes-time.txt" | tr -s '\t' ' '
           echo "source records: $(wc -l < "$RUNNER_TEMP/source-hashes.jsonl"), missing in Tengoku's environment: $(grep -c '"missing":true' "$RUNNER_TEMP/source-hashes.jsonl" || true)"
       - name: "The source's extension entries: tengai-extinfo in Tengoku's environment over every constant of the layers (the constructors and recursors of a block too)"
@@ -582,8 +609,9 @@ jobs:
           (cd core && lake build tengai-extinfo 2>&1 | tail -3)
           cat "$RUNNER_TEMP"/layers/*.constants.jsonl > "$RUNNER_TEMP/ext-names.jsonl"
           wc -l "$RUNNER_TEMP/ext-names.jsonl"
+          mapfile -t roots < "$RUNNER_TEMP/tree-roots.txt"
           cd .tengoku
-          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo" "$RUNNER_TEMP/ext-names.jsonl" Tengoku.All > "$RUNNER_TEMP/ext.jsonl" 2> "$RUNNER_TEMP/ext-time.txt" || { tail -20 "$RUNNER_TEMP/ext-time.txt"; exit 1; }
+          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo" "$RUNNER_TEMP/ext-names.jsonl" "${roots[@]}" > "$RUNNER_TEMP/ext.jsonl" 2> "$RUNNER_TEMP/ext-time.txt" || { tail -20 "$RUNNER_TEMP/ext-time.txt"; exit 1; }
           grep -E "extinfo:|Elapsed|Maximum resident" "$RUNNER_TEMP/ext-time.txt" | tr -s '\t' ' '
           cd "$GITHUB_WORKSPACE"
           # every row must belong to a layer: the split by layer is the first thing a replay does, and it refuses a row that no layer holds
@@ -593,7 +621,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/kept"
           zstd -3 -T0 -q "$RUNNER_TEMP/sample-stmt.ndjson" -o "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
-          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json; do
+          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json tree-roots.json; do
             if [ -f "$RUNNER_TEMP/$f" ]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/kept/$f"; fi
           done
           if [ -f "$RUNNER_TEMP/source-hashes.jsonl" ]; then zstd -3 -T0 -q "$RUNNER_TEMP/source-hashes.jsonl" -o "$RUNNER_TEMP/kept/source-hashes.jsonl.zst"; fi
@@ -660,6 +688,7 @@ jobs:
             ${{ runner.temp }}/init-compare.json
             ${{ runner.temp }}/init-exports/*
             ${{ runner.temp }}/sample-stmt-stats.json
+            ${{ runner.temp }}/tree-roots.json
             ${{ runner.temp }}/tree-stmt-stats.json
             ${{ runner.temp }}/replay-*-stats.json
             ${{ runner.temp }}/refused-*.txt

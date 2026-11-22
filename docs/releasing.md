@@ -15,6 +15,10 @@ A snapshot is built as a workflow artifact (`statements-snapshot-<run id>`, 30 d
 - **if the extension entries were put back** (`checks.extensions`), **Lean refused none** of them and **they were compared** with Tengoku's by the same tool (`checks.ext_faithful`) **without a difference, a loss or an invention** (what Lean core's own constants say, and the instances Tengoku has the other way, are counted and reported, not refused);
 - the tag is `snapshot-<name>` (letters, digits, dot, dash, underscore) and **not a version**: the release barrier (`release-guard.toml`, `max_major = 0`) allows no v1 of anything in this repository before the owner's explicit approval, and a snapshot is experimental by definition.
 
+## Leaving libraries out
+
+A library whose licence text is missing at the commit the tree pins blocks the release (the gate above), and the snapshot is one tree: the other libraries are not blocked by it. The export can leave libraries out (`exclude_libraries`, with `sample_mode=tree` and `tree=false`; docs/statements.md): `tools/promote/tree_roots.py` leaves out the libraries asked for **and every library that imports one of them** (a constant a statement reaches is in the export), the kept roots replace `Tengoku.All`, Lean's own list of the modules the kept roots import is checked against what was left out before the export starts, the manifest pins `excluded_libraries`, and the notes print the pins. Which libraries to leave out, and whether to release without them or to move their pins first, is the owner's decision: the snapshot says exactly what it does not hold.
+
 ## The workflow
 
 `release-snapshot` (Actions, run by hand, from `main` only):

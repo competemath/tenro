@@ -8,6 +8,13 @@ A snapshot holds statements that Tengoku took from other people's libraries. Eac
 registry has no licence for is listed as `unknown` and is not guessed. With `--sample` only the libraries the sample names (its `library` field) are listed.
 
 Writes `{"libraries": {key: {"sources": [{"repo", "commit", "licence"}], "records": n}}, "licences": {licence: number of libraries}, "unknown": [libraries without a licence]}`; the manifest of a snapshot records it.
+
+  attribution.py --filter ATTRIBUTION.json --exclude-report TREE-ROOTS.json --out ATTRIBUTION.json
+
+A whole-tree export that leaves libraries out (`exclude_libraries`, tools/promote/tree_roots.py) holds none of their content, so the attribution must not name them: a library the snapshot does not hold, whose repository has no
+licence text at the pinned commit, would block a release for nothing, and a notice for content that is not there is a false statement. The report of the roots says which roots were left out; a root `Tengoku.LanaBelyi` is
+the registry library `lana-belyi` (the names are compared with everything but letters and digits dropped and the case folded). A root that matches two libraries is an error (what was left out could not be told apart from
+what was kept); a root that matches none is reported, not an error (it is already gone, or it is not a library of the registry). The counts of libraries per licence and the list of unknown ones are made again.
 """
 
 from __future__ import annotations
@@ -66,13 +73,66 @@ def build(intake: Path, licences: dict[str, str], only: set[str] | None = None) 
     return {"libraries": libraries, "licences": dict(sorted(counts.items())), "unknown": unknown}
 
 
+def norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def drop_excluded(att: dict, report: dict) -> tuple[dict, list[str], list[str]]:
+    """the attribution without the libraries the report of the roots says were left out; returns it, the libraries dropped and the roots that matched no library"""
+    libs = att["libraries"]
+    by: dict[str, list[str]] = {}
+    for key in libs:
+        by.setdefault(norm(key), []).append(key)
+    gone: list[str] = []
+    unmatched: list[str] = []
+    for e in report.get("excluded", []):
+        root = e["root"]
+        hit = by.get(norm(root.split(".", 1)[-1]), [])
+        if len(hit) > 1:
+            raise SystemExit(
+                f"attribution: the library left out, {root}, matches {len(hit)} libraries of the registry ({', '.join(hit)}): what it no longer holds cannot be told from what was kept"
+            )
+        if hit:
+            gone.append(hit[0])
+        else:
+            unmatched.append(root)
+    kept = {k: v for k, v in libs.items() if k not in gone}
+    counts: Counter[str] = Counter()
+    for lib in kept.values():
+        for lic in sorted({s["licence"] for s in lib["sources"] if s["licence"] is not None}):
+            counts[lic] += 1
+    return (
+        {"libraries": kept, "licences": dict(sorted(counts.items())), "unknown": [u for u in att["unknown"] if u in kept]},
+        sorted(gone),
+        unmatched,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--intake", required=True, type=Path)
-    ap.add_argument("--sources", required=True, type=Path)
+    ap.add_argument("--intake", type=Path)
+    ap.add_argument("--sources", type=Path)
     ap.add_argument("--sample", type=Path)
+    ap.add_argument(
+        "--filter", type=Path, help="an attribution.json to leave libraries out of (with --exclude-report), instead of making one"
+    )
+    ap.add_argument("--exclude-report", type=Path, help="tree-roots.json of tools/promote/tree_roots.py: the roots that were left out")
     ap.add_argument("--out", required=True, type=Path)
     a = ap.parse_args(argv)
+    if a.filter is not None:
+        if a.exclude_report is None:
+            ap.error("--filter needs --exclude-report")
+        att, gone, unmatched = drop_excluded(
+            json.loads(a.filter.read_text(encoding="utf-8")), json.loads(a.exclude_report.read_text(encoding="utf-8"))
+        )
+        a.out.write_text(json.dumps(att, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        print(
+            f"attribution: {len(gone)} libraries left out ({', '.join(gone)}), {len(att['libraries'])} remain; licences {att['licences']}"
+            + (f"; {len(unmatched)} roots matched no library (already gone, or not in the registry): {unmatched}" if unmatched else "")
+        )
+        return 0
+    if a.intake is None or a.sources is None:
+        ap.error("--intake and --sources are needed to make the attribution")
     licences = json.loads(a.sources.read_text(encoding="utf-8")).get("licences", {})
     only = None
     if a.sample:
