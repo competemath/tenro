@@ -363,6 +363,19 @@ class ManifestLayers(unittest.TestCase):
             f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
             self.assertEqual((f["problems"], f["ok"]), ({"type_differs": 3}, False))
 
+    def test_the_attribution_is_recorded_when_there_is_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertNotIn("attribution", M.build_layers(d, d / "layered", {}))
+            att = {
+                "libraries": {"A": {"sources": [{"repo": "https://github.com/o/a", "commit": "c" * 40, "licence": "MIT"}], "records": 2}},
+                "licences": {"MIT": 1},
+                "unknown": [],
+            }
+            (d / "attribution.json").write_text(json.dumps(att))
+            self.assertEqual(M.build_layers(d, d / "layered", {})["attribution"], att)
+
     def test_the_manifest_is_the_same_for_the_same_inputs_and_main_writes_it(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)

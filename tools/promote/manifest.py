@@ -182,10 +182,13 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
     ids = read_json(d / "statement-ids-layers.json")
     load = read_json(d / "layers-load.json")
     faithful = read_json(d / "faithful.json")
+    attribution = read_json(d / "attribution.json")
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
     return {
         "schema": 2,
         **({"flavor": flavor} if flavor else {}),
+        # where the content comes from: per library the repository, the commit and the licence (tools/promote/attribution.py)
+        **({"attribution": attribution} if attribution is not None else {}),
         **({"indexes": index_record(indexes)} if indexes is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
