@@ -273,6 +273,46 @@ class ManifestLayers(unittest.TestCase):
             )
             self.assertTrue(m["checks"]["axioms"]["standard_only"])
 
+    def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            (d / "layer-stats.jsonl").write_text(
+                json.dumps({"ext": None, "replay": {"added": 9, "skipped": 3, "refused": []}})
+                + "\n"
+                + json.dumps({"ext": None, "replay": {"added": 5, "skipped": 0, "refused": ["A.weird", "A.odd"]}})
+                + "\n"
+            )
+            (d / "layers-load.json").write_text(
+                json.dumps({"rows": [["Foundation", 0.4, {"median": 0.3, "net_median": 0.06, "net_min": 0.05, "constants": 12}]], "empty": {"min": 0.2, "median": 0.24}})
+            )
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"}, flavor="statements")
+            self.assertEqual(m["flavor"], "statements")
+            self.assertEqual(m["theorems"], [])  # the table of which layer holds which theorem is the layers index
+            self.assertEqual(m["totals"]["theorems"], 2)  # the count stays
+            self.assertEqual(m["totals"]["refused"], 2)
+            self.assertEqual(m["libraries"], ["A"])
+            self.assertEqual(m["checks"]["session_load"]["sets"]["Foundation"]["constants"], 12)
+            plain = M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            self.assertNotIn("flavor", plain)  # a proofs promotion is recorded as before
+            self.assertNotIn("refused", plain["totals"])
+            self.assertEqual(len(plain["theorems"]), 2)
+
+    def test_main_takes_the_flavor_and_the_layers_index_stats_are_recorded_with_the_indexes(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            idx = d / "idx"
+            idx.mkdir()
+            (idx / "layers.jsonl").write_text('{"name": "A.t1", "library": "A", "layer": "TengaiData.Topic.A"}\n')
+            (idx / "layers-stats.json").write_text(json.dumps({"placed": 1, "unplaced": 0, "sha256": {"layers.jsonl": "x"}}))
+            args = ["layers", "--dir", str(d), "--layered", str(d / "layered"), "--out", str(d / "a.json"), "--pin", "tengoku=abc", "--indexes", str(idx), "--flavor", "statements"]
+            self.assertEqual(M.main(args), 0)
+            m = json.loads((d / "a.json").read_text())
+            self.assertEqual(m["flavor"], "statements")
+            self.assertEqual(m["indexes"]["layers"], {"placed": 1, "unplaced": 0})
+            self.assertEqual(sorted(m["indexes"]["files"]), ["layers-stats.json", "layers.jsonl"])
+
     def test_the_manifest_is_the_same_for_the_same_inputs_and_main_writes_it(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
