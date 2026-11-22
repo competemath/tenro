@@ -398,6 +398,25 @@ jobs:
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/snapshot-hashes-time.txt" | tr -s '\t' ' '
           { echo "### Faithful: the snapshot against Tengoku's environment"; echo; echo '```'; python3 tools/promote/faithful.py "$RUNNER_TEMP/source-hashes.jsonl" "$RUNNER_TEMP/snapshot-hashes.jsonl" --only-in-snapshot --out "$RUNNER_TEMP/faithful.json" || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
           python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/faithful.json"))["passed"] else 1)'
+      - name: "Extension entries: the same rows read by the same tool in the snapshot's environment, compared with Tengoku's (instances, classes, structures, projections, reducibility, binder annotations)"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.WIDE_SAMPLE == 'true'
+        continue-on-error: true   # a difference is recorded in the manifest and the release gate refuses it; it does not end a run of an hour at its end
+        run: |
+          if [ ! -s "$RUNNER_TEMP/ext.jsonl" ]; then
+            echo "::notice::the export of run $EXPORT_RUN has no extension entries (a run with ext_rows=true makes them): none were put back, none are compared"
+            exit 0
+          fi
+          # every constant of the layers that were replayed
+          : > "$RUNNER_TEMP/replayed-constants.jsonl"
+          while read -r module _; do cat "$RUNNER_TEMP/layers/$module.constants.jsonl" >> "$RUNNER_TEMP/replayed-constants.jsonl"; done < "$RUNNER_TEMP/layer-order.txt"
+          wc -l "$RUNNER_TEMP/replayed-constants.jsonl"
+          (cd core && lake build tengai-extinfo 2>&1 | tail -3)
+          core_path="$(cd core && lake env printenv LEAN_PATH)"
+          mapfile -t mods < <(cut -d' ' -f1 "$RUNNER_TEMP/layer-order.txt")
+          LEAN_PATH="$RUNNER_TEMP/layered:$core_path" /usr/bin/time -v core/.lake/build/bin/tengai-extinfo "$RUNNER_TEMP/replayed-constants.jsonl" "${mods[@]}" > "$RUNNER_TEMP/snapshot-ext.jsonl" 2> "$RUNNER_TEMP/snapshot-ext-time.txt" || { tail -20 "$RUNNER_TEMP/snapshot-ext-time.txt"; exit 1; }
+          grep -E "extinfo:|Elapsed|Maximum resident" "$RUNNER_TEMP/snapshot-ext-time.txt" | tr -s '\t' ' '
+          mode=global; if [ "$SCOPED_INSTANCES" = true ]; then mode=scoped; fi
+          { echo "### Extension entries: the snapshot against Tengoku's"; echo; echo '```'; python3 tools/promote/ext_compare.py "$RUNNER_TEMP/ext.jsonl" "$RUNNER_TEMP/snapshot-ext.jsonl" --instances "$mode" --out "$RUNNER_TEMP/ext-faithful.json" || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "Layers: the replayed layers exported again from their .olean files and checked by nanoda, an independent kernel that shares no code with Lean (invariant I1); a theorem is an axiom of its type here, so it checks every other declaration"
         if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.NANODA == 'true' && env.WIDE_SAMPLE == 'true'
         timeout-minutes: 120
@@ -527,6 +546,7 @@ jobs:
             ${{ runner.temp }}/pack.json
             ${{ runner.temp }}/verify.json
             ${{ runner.temp }}/faithful.json
+            ${{ runner.temp }}/ext-faithful.json
             ${{ runner.temp }}/nanoda-layers.out
             ${{ runner.temp }}/nanoda-layers-time.txt
           retention-days: 30

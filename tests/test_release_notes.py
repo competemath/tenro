@@ -57,6 +57,16 @@ MANIFEST = {
 }
 
 
+EXT_FAITHFUL = {
+    "instances": "global",
+    "same": 900,
+    "differs": 0,
+    "lost": 0,
+    "extra": 0,
+    "deviation": 7,
+    "deviations": {"scoped_became_global": 7},
+    "ok": True,
+}
 EXT = {"layers": 2, "reducibility": 11, "projections": 4, "structures": 3, "classes": 2, "instances": 1234, "failed": 0, "ok": True}
 
 
@@ -86,8 +96,18 @@ class Gates(unittest.TestCase):
         m["checks"]["extensions"] = dict(EXT, failed=3, ok=False)
         self.assertIn("refused 3 extension entries", " ".join(N.gates(m)))
         m["checks"]["extensions"] = EXT
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL  # put back and compared: nothing refused
         self.assertEqual(N.gates(m), [])
         self.assertEqual(N.gates(MANIFEST), [])  # a snapshot without them (checks.extensions absent) is released as constants only
+
+    def test_extension_entries_that_were_put_back_must_have_been_compared_and_must_agree(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        self.assertIn("never compared", " ".join(N.gates(m)))  # carried and not compared: refused
+        m["checks"]["ext_faithful"] = dict(EXT_FAITHFUL, differs=3, lost=1, ok=False)
+        self.assertIn("3 differ, 1 lost, 0 extra", " ".join(N.gates(m)))
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL  # deviations (scoped instances of Tengoku made global) are reported, not refused
+        self.assertEqual(N.gates(m), [])
 
     def test_an_independent_kernel_that_did_not_accept_stops_a_release_and_none_run_does_not(self):
         m = copy.deepcopy(MANIFEST)
@@ -136,6 +156,15 @@ class Texts(unittest.TestCase):
         self.assertIn("no simp sets, notation, macros or tactics", text)
         self.assertNotIn("constants only", text)
         self.assertIn("refused by Lean: 0", text)
+
+    def test_the_notes_say_what_the_extension_entries_comparison_found_including_the_instances_the_other_way(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        m["checks"]["ext_faithful"] = EXT_FAITHFUL
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("read back by the same tool", text)
+        self.assertIn("900 entries the same, 0 differ, 0 lost, 0 extra", text)
+        self.assertIn("instances registered global, of which 7 are the other way in Tengoku ({'scoped_became_global': 7})", text)
 
     def test_the_notes_say_that_an_independent_kernel_accepted_the_layers_and_then_do_not_list_it_as_unchecked(self):
         m = copy.deepcopy(MANIFEST)

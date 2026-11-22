@@ -200,6 +200,7 @@ def build_layers(
     load = read_json(d / "layers-load.json")
     faithful = read_json(d / "faithful.json")
     attribution = read_json(d / "attribution.json")
+    ext_faithful = read_json(d / "ext-faithful.json")
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
     ext_counts = [x["extensions"] for x in layers if x["extensions"]]
     extensions = (
@@ -243,6 +244,15 @@ def build_layers(
             "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
             # the extension entries carried back from Tengoku (tengai-replay --ext: reducibility, projections, structures, classes, instances) summed over the layers that carried them: null when no layer did
             "extensions": extensions,
+            # the same rows read by the same tool in Tengoku's environment and in the snapshot's (tools/promote/ext_compare.py): null when it did not run
+            "ext_faithful": None
+            if ext_faithful is None
+            else {
+                "instances": ext_faithful["instances"],
+                **{k: ext_faithful["totals"][k] for k in ("same", "differs", "lost", "extra", "deviation")},
+                "deviations": ext_faithful["deviations"],
+                "ok": ext_faithful["ok"],
+            },
             "nanoda": {"status": status, "declarations": int(declared[-1]) if declared else None} if status else None,
             "statement_ids": None
             if ids is None

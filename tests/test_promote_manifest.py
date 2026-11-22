@@ -323,6 +323,34 @@ class ManifestLayers(unittest.TestCase):
                 M.build_layers(d, d / "layered", {"tengoku": "abc"}, legal=legal)["legal"]["problems"]
             )  # an index that is not there says nothing: not zero
 
+    def test_the_extension_comparison_is_recorded_when_it_ran_and_null_when_it_did_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertIsNone(M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["ext_faithful"])
+            report = {
+                "instances": "global",
+                "totals": {"same": 10, "differs": 1, "lost": 2, "extra": 0, "deviation": 3},
+                "deviations": {"scoped_became_global": 3},
+                "ok": False,
+                "examples": {"lost": [{"name": "x"}]},
+            }
+            (d / "ext-faithful.json").write_text(json.dumps(report))
+            got = M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["ext_faithful"]
+            self.assertEqual(
+                got,
+                {
+                    "instances": "global",
+                    "same": 10,
+                    "differs": 1,
+                    "lost": 2,
+                    "extra": 0,
+                    "deviation": 3,
+                    "deviations": {"scoped_became_global": 3},
+                    "ok": False,
+                },
+            )
+
     def test_main_takes_the_legal_directory(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
