@@ -134,14 +134,14 @@ def index_record(indexes: Path) -> dict:
     if not files:
         raise SystemExit(f"manifest: {indexes} holds no index file")
     rec: dict = {"files": {p.name: sha256_and_sizes(p) for p in files}}
-    for key, stats in (("build", "stats.json"), ("intent", "intent-stats.json")):
+    for key, stats in (("build", "stats.json"), ("intent", "intent-stats.json"), ("layers", "layers-stats.json")):
         data = read_json(indexes / stats)
         if data is not None:
             rec[key] = {k: v for k, v in data.items() if k != "sha256"}  # the hashes are in `files`
     return rec
 
 
-def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None) -> dict:
+def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | None = None, flavor: str | None = None) -> dict:
     """the record of a promotion in layers (schema 2): every layer with what it imports, what it holds, what its replay added and the hash and size of its olean; the checks of the whole (independent kernel over all
     the layers, statement ids, axioms, what a session loads). A layer whose file is missing is an error, a check that did not run is null."""
     plan = json.loads((d / "layers" / "layers.json").read_text(encoding="utf-8"))
@@ -184,15 +184,23 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
     axioms_text = (d / "layers-axioms.txt").read_text(encoding="utf-8") if (d / "layers-axioms.txt").exists() else ""
     return {
         "schema": 2,
+        **({"flavor": flavor} if flavor else {}),
         **({"indexes": index_record(indexes)} if indexes is not None else {}),
         "pins": dict(sorted(pins.items())),
         "libraries": sorted({r["library"] for r in sample}),
-        "theorems": sorted(sample, key=lambda r: r["name"]),
+        # a statements snapshot has hundreds of thousands of theorems: the table of which layer holds which is the layers index (tools/promote/layer_index.py), not a list in the manifest
+        "theorems": [] if flavor == "statements" else sorted(sample, key=lambda r: r["name"]),
         "layers": layers,
         "totals": {
             "olean_bytes": sum(x["olean"]["bytes"] for x in layers),
             "constants_added": sum((x["replay"] or {}).get("added", 0) for x in layers) if stats_lines else None,
             "theorems": len(sample),
+            # a statements snapshot: the declarations the kernel refused and that stand as axioms of their type (tengai-replay --stub-refused); None when no replay statistics were left
+            **(
+                {"refused": sum(len((x["replay"] or {}).get("refused") or []) for x in layers) if stats_lines else None}
+                if flavor == "statements"
+                else {}
+            ),
         },
         "checks": {
             "kernel": "accepted" if stats_lines and all(x["replay"] for x in layers) else None,
@@ -212,7 +220,10 @@ def build_layers(d: Path, layered: Path, pins: dict[str, str], indexes: Path | N
             else {
                 "baseline": load.get("empty"),
                 "sets": {
-                    row[0]: {"olean_mb": round(row[1], 1), **{k: row[2][k] for k in ("median", "net_median", "net_min") if k in row[2]}}
+                    row[0]: {
+                        "olean_mb": round(row[1], 1),
+                        **{k: row[2][k] for k in ("median", "net_median", "net_min", "constants") if k in row[2]},
+                    }
                     for row in load["rows"]
                     if isinstance(row[2], dict)
                 },
@@ -231,8 +242,13 @@ def main_layers(argv: list[str]) -> int:
         "--indexes",
         help="the directory of the retrieval indexes (build.py and intent.py wrote it): recorded with its hashes, packed with the snapshot",
     )
+    ap.add_argument(
+        "--flavor",
+        choices=["statements"],
+        help="a snapshot of the statements flavor (docs/statements.md): recorded, and the declarations the kernel refused are counted",
+    )
     a = ap.parse_args(argv)
-    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None)
+    m = build_layers(Path(a.dir), Path(a.layered), dict(p.split("=", 1) for p in a.pin), Path(a.indexes) if a.indexes else None, a.flavor)
     with open(a.out, "w", encoding="utf-8") as f:
         f.write(json.dumps(m, indent=1, sort_keys=True) + "\n")
     print(

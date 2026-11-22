@@ -52,9 +52,13 @@ on:
         required: true
         default: "false"
       topics_measured:
-        description: "How many topics layers_replay replays and measures: the largest, the smallest and evenly spaced ranks between"
+        description: "How many topics layers_replay replays and measures: the largest, the smallest and evenly spaced ranks between (as many as there are topics: all of them)"
         required: true
         default: "10"
+      pack:
+        description: "With layers_replay and all the topics replayed: the layers index, the manifest (flavor statements), one tar compressed with zstd, verified and imported from its unpacked copy, kept as an artifact. true or false"
+        required: true
+        default: "false"
 permissions: {}
 concurrency:
   group: export-statements
@@ -70,6 +74,7 @@ env:
   EXPORT_RUN: ${{ inputs.export_run }}
   LAYERS_REPLAY: ${{ inputs.layers_replay }}
   TOPICS_MEASURED: ${{ inputs.topics_measured }}
+  PACK: ${{ inputs.pack }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -258,6 +263,12 @@ jobs:
           for layer in p["layers"]:
               if layer["module"] in done:
                   print(layer["module"].removeprefix("TengaiData.").replace(".", "_"), layer["module"])  # Foundation, Topic_Aintlib, ...
+          # combinations, for comparison (a session that needs several libraries): the four largest topics, and every layer replayed
+          tops = sorted((x for x in p["layers"] if x["module"] in done and x["topic"] is not None), key=lambda x: (-x["constants"], x["module"]))
+          if len(tops) >= 4:
+              print("Combo_Giants", *[x["module"] for x in tops[:4]])
+          if len(tops) >= 2:
+              print("Combo_All", *[x["module"] for x in p["layers"] if x["module"] in done])
           PY
           args=(--runs 9 --baseline "lake env lean $RUNNER_TEMP/l-empty.lean")
           while read -r label modules; do
@@ -285,16 +296,104 @@ jobs:
                   loaded.update(by_module[m]["imports"])
               consts = sum(by_module[m]["constants"] for m in loaded)
               rows.append((label, consts, sum(size[m] for m in loaded) / 1e6, cmp[label]))
-          print("## what a session loads: the foundation, and a topic with it")
+          print("## what a session loads: the foundation, and a topic with it (Combo_: several topics in one session, for comparison)")
           print("| imports | constants loaded | olean MB loaded | cold import, median (s) | net over an empty module, paired median (s) | net, fastest runs (s) |")
           print("|---|---:|---:|---:|---:|---:|")
           for label, consts, mb, r in rows:
               print(f"| {label} | {consts:,} | {mb:.1f} | {r['median']} | {r['net_median']:.3f} | {r['net_min']:.3f} |")
           print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load {cap} s (net, paired median)")
-          over = [label for label, _, _, r in rows if r["net_median"] > cap]
-          print(f"sessions over the cap: {', '.join(over) if over else 'none'}")
-          json.dump({"rows": [[label, c, mb, r] for label, c, mb, r in rows], "empty": empty, "olean": size, "cap": cap}, open(f"{t}/layers-load.json", "w", encoding="utf-8"))
+          singles = [x for x in rows if not x[0].startswith("Combo_")]
+          over = [label for label, _, _, r in singles if r["net_median"] > cap]
+          print(f"sessions over the cap (the foundation, and the foundation with one topic; {len(singles)} measured): {', '.join(over) if over else 'none'}")
+          if singles:
+              worst = max(singles, key=lambda x: x[3]["net_median"])
+              print(f"the slowest of them: {worst[0]}, {worst[1]:,} constants, +{worst[3]['net_median']:.3f} s")
+          json.dump({"rows": [[label, mb, {**r, "constants": c}] for label, c, mb, r in rows], "empty": empty, "olean": size, "cap": cap}, open(f"{t}/layers-load.json", "w", encoding="utf-8"))
           PY
+      - name: "The snapshot: the layers index, the manifest, one tar compressed with zstd, verified, and imported from its unpacked copy"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          t = os.environ["RUNNER_TEMP"]
+          planned = len(json.load(open(f"{t}/layers/layers.json", encoding="utf-8"))["layers"])
+          replayed = sum(1 for line in open(f"{t}/layer-order.txt", encoding="utf-8") if line.strip())
+          if replayed != planned:
+              sys.exit(f"pack needs every layer replayed: {replayed} of {planned}; set topics_measured to the number of topics")
+          PY
+          # what the snapshot came from: the tenro commit that made the export (the run of export_run, or this run), its Tengoku pin and exporter patch
+          src_sha="$GITHUB_SHA"
+          if [ -n "$EXPORT_RUN" ]; then src_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$EXPORT_RUN" -q .head_sha)"; fi
+          [[ "$src_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "bad sha $src_sha"; exit 1; }
+          tengoku_pin="$(gh api "repos/$GITHUB_REPOSITORY/contents/tengoku.pin?ref=$src_sha" -H 'Accept: application/vnd.github.raw' | tr -d ' \n')"
+          patch_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/tools/export/lean4export-statements.patch?ref=$src_sha" -H 'Accept: application/vnd.github.raw' | sha256sum | cut -d' ' -f1)"
+          tengai_tag="$(python3 -c 'import json; print(json.load(open("core.lock"))["tag"])')"
+          echo "pins: tenro $src_sha, Tengoku $tengoku_pin, exporter patch $patch_sha, tengai $tengai_tag"
+          python3 tools/promote/layer_index.py --layers "$RUNNER_TEMP/layers" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/indexes" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
+          # the export and the parsed tables are not needed any more (the runner's disk)
+          rm -f "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/tables.olean"
+          python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
+          /usr/bin/time -v zstd -T0 -19 --long=27 -q "$RUNNER_TEMP/snapshot.tar" -o "$RUNNER_TEMP/snapshot.tar.zst" 2> "$RUNNER_TEMP/zstd-time.txt"
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/zstd-time.txt" | tr -s '\t' ' '
+          tar_bytes="$(stat -c %s "$RUNNER_TEMP/snapshot.tar")"
+          rm -f "$RUNNER_TEMP/snapshot.tar"
+          zst_sha="$(sha256sum "$RUNNER_TEMP/snapshot.tar.zst" | cut -d' ' -f1)"
+          python3 tools/release/pack.py verify "$RUNNER_TEMP/snapshot.tar.zst" --sha256 "$zst_sha" --into "$RUNNER_TEMP/unpacked" > "$RUNNER_TEMP/verify.json"
+          # a session from the unpacked copy: one import of the foundation and of the topics of 24 theorems of the index (3 of each of 8 layers), and a #check of each (a name that does not resolve is an error)
+          python3 - <<'PY'
+          import json, os, re
+          t = os.environ["RUNNER_TEMP"]
+          rows = [json.loads(ln) for ln in open(f"{t}/indexes/layers.jsonl", encoding="utf-8")]
+          simple = re.compile(r"^[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*$")
+          by_layer: dict[str, list[str]] = {}
+          for r in rows:
+              if simple.match(r["name"]):
+                  by_layer.setdefault(r["layer"], []).append(r["name"])
+          layers = sorted(by_layer)
+          chosen = [layers[i * (len(layers) - 1) // 7] for i in range(8)] if len(layers) > 8 else layers
+          names = [n for layer in dict.fromkeys(chosen) for n in by_layer[layer][:: max(1, len(by_layer[layer]) // 3)][:3]]
+          with open(f"{t}/check.lean", "w", encoding="utf-8") as f:
+              for layer in dict.fromkeys(chosen):
+                  f.write(f"import {layer}\n")
+              f.write("\n" + "".join(f"#check @{n}\n" for n in names))
+          print(len(names), "names in", len(set(chosen)), "layers")
+          open(f"{t}/check-count.txt", "w", encoding="utf-8").write(str(len(names)))
+          PY
+          core_path="$(cd core && lake env printenv LEAN_PATH)"
+          (cd core && LEAN_PATH="$RUNNER_TEMP/unpacked:$core_path" lake env lean "$RUNNER_TEMP/check.lean" > "$RUNNER_TEMP/check.out" 2> "$RUNNER_TEMP/check.err") || { head -20 "$RUNNER_TEMP/check.err" "$RUNNER_TEMP/check.out"; exit 1; }
+          echo "$zst_sha  snapshot.tar.zst ($tar_bytes bytes as a tar)" > "$RUNNER_TEMP/zstd-sha256.txt"
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          m = json.load(open(f"{t}/manifest.json", encoding="utf-8"))
+          v = json.load(open(f"{t}/verify.json", encoding="utf-8"))
+          pk = json.load(open(f"{t}/pack.json", encoding="utf-8"))
+          idx = json.load(open(f"{t}/indexes/layers-stats.json", encoding="utf-8"))
+          checks = int(open(f"{t}/check-count.txt", encoding="utf-8").read())  # the names the session `#check`ed (a count of " : " in its output would count the binders of the types too)
+          zst = os.path.getsize(f"{t}/snapshot.tar.zst")
+          zst_sha = open(f"{t}/zstd-sha256.txt", encoding="utf-8").read().split()[0]
+          print("### The statements snapshot")
+          print()
+          print(f"* {m['totals']['theorems']:,} theorems of {len(m['libraries'])} libraries in {len(m['layers'])} layers; {m['totals']['constants_added']:,} constants added; olean bytes {m['totals']['olean_bytes']:,}; **refused by the kernel: {m['totals']['refused']}**")
+          print(f"* the layers index places {idx['placed']:,} of {idx['theorems']:,} theorems ({idx['unplaced']:,} unplaced; {idx['in_foundation']:,} statements are in the foundation)")
+          print(f"* the tar: {pk['modules']} oleans + the manifest + {len(m['indexes']['files'])} index files; zstd -19 --long=27: {zst:,} bytes ({zst / 1e6:,.0f} MB), sha256 `{zst_sha}`")
+          print(f"* `pack.py verify` of the .zst: passed (every olean has the sha256 and the size of the manifest, every index file too); a session from the unpacked copy imported its layers and `#check`ed {checks} theorems: no error")
+          print(f"* the pins of the manifest: {json.dumps(m['pins'], sort_keys=True)}")
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
+        with:
+          name: statements-snapshot-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/snapshot.tar.zst
+            ${{ runner.temp }}/manifest.json
+            ${{ runner.temp }}/zstd-sha256.txt
+            ${{ runner.temp }}/pack.json
+            ${{ runner.temp }}/verify.json
+          retention-days: 30
+          compression-level: 0   # the snapshot is already compressed (zstd)
+          if-no-files-found: error
       - name: "The sample's export, compressed, with its names and topics (a later job replays it without Tengoku)"
         if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
