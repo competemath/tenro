@@ -43,6 +43,18 @@ on:
         description: "Keep the sample's export (zstd, with its names and topics) as an artifact, so that a later job replays it without Tengoku: no setup, no export. true or false"
         required: true
         default: "false"
+      export_run:
+        description: "The id of an earlier run of this workflow that kept its export (keep_export): replay that export instead of making one, with no Tengoku setup and no export (empty: make one)"
+        required: false
+        default: ""
+      layers_replay:
+        description: "With layers=true: replay the foundation and a chosen number of topics by layers (tengai-replay --only/--import) and measure what a session loads of them against the cap. true or false"
+        required: true
+        default: "false"
+      topics_measured:
+        description: "How many topics layers_replay replays and measures: the largest, the smallest and evenly spaced ranks between"
+        required: true
+        default: "10"
 permissions: {}
 concurrency:
   group: export-statements
@@ -55,6 +67,9 @@ env:
   REPLAY: ${{ inputs.replay }}
   LAYERS: ${{ inputs.layers }}
   KEEP_EXPORT: ${{ inputs.keep_export }}
+  EXPORT_RUN: ${{ inputs.export_run }}
+  LAYERS_REPLAY: ${{ inputs.layers_replay }}
+  TOPICS_MEASURED: ${{ inputs.topics_measured }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -66,7 +81,7 @@ jobs:
   export:
     runs-on: ubuntu-latest
     timeout-minutes: 330
-    permissions: { contents: read }
+    permissions: { contents: read, actions: read }
     steps:
       - name: Free disk (Tengoku's compiled cache is several GB)
         run: |
@@ -81,6 +96,7 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/0e36a07b9bbcc5381fa6250df109f9a4f94d7bac/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - name: lean4export at the pinned commit, with the --statements patch
+        if: env.EXPORT_RUN == ''
         run: |
           for m in $MODULES; do [[ "$m" =~ ^[A-Za-z0-9_.]+$ ]] || { echo "bad module $m"; exit 1; }; done
           git clone -q https://github.com/leanprover/lean4export "$RUNNER_TEMP/lean4export"
@@ -91,6 +107,7 @@ jobs:
           lake build 2>&1 | tail -3
           ls -l .lake/build/bin/lean4export
       - name: "The patch changes nothing but theorems: Init exported both ways (full, --statements) and compared declaration by declaration"
+        if: env.EXPORT_RUN == ''
         run: |
           cd "$RUNNER_TEMP/lean4export"
           l4e=".lake/build/bin/lean4export"
@@ -107,16 +124,30 @@ jobs:
           { echo "### Init, full and with --statements"; echo; echo '```'; python3 tools/export/compare_exports.py "$RUNNER_TEMP/init-full.ndjson" "$RUNNER_TEMP/init-stmt.ndjson" --out "$RUNNER_TEMP/init-compare.json"; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
           python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/init-compare.json"))["passed"] else 1)'
       - name: The Init exports, compressed, for a look at what differs (only when the comparison failed)
-        if: failure()
+        if: failure() && env.EXPORT_RUN == ''
         run: |
           mkdir -p "$RUNNER_TEMP/init-exports"
           zstd -3 -T0 -q "$RUNNER_TEMP/init-full.ndjson" -o "$RUNNER_TEMP/init-exports/init-full.ndjson.zst"
           zstd -3 -T0 -q "$RUNNER_TEMP/init-stmt.ndjson" -o "$RUNNER_TEMP/init-exports/init-stmt.ndjson.zst"
           ls -l "$RUNNER_TEMP/init-exports"
       - name: Tengoku at the pin, with its compiled cache
+        if: env.EXPORT_RUN == ''
         run: scripts/tengoku-setup.sh
+      - name: "The export of an earlier run (export_run), downloaded: no Tengoku, no export"
+        if: env.EXPORT_RUN != ''
+        run: |
+          [[ "$EXPORT_RUN" =~ ^[0-9]+$ ]] || { echo "bad export_run"; exit 1; }
+          gh run download "$EXPORT_RUN" --repo "$GITHUB_REPOSITORY" --name "statements-export-$EXPORT_RUN" --dir "$RUNNER_TEMP/kept"
+          ls -l "$RUNNER_TEMP/kept"
+          zstd -d -q "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst" -o "$RUNNER_TEMP/sample-stmt.ndjson"
+          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json; do
+            if [ -f "$RUNNER_TEMP/kept/$f" ]; then cp "$RUNNER_TEMP/kept/$f" "$RUNNER_TEMP/$f"; fi
+          done
+          rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
+          ls -l "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/topics.json"
+          { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $(wc -l < "$RUNNER_TEMP/names.txt") names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample as statements (by default the wide sample of the transplant runs): the same roots, theorems as axioms unless a definition's value mentions them"
-        if: env.WIDE_SAMPLE == 'true'
+        if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
           [[ "$SAMPLE_COUNT" =~ ^[0-9]+$ ]] || { echo "bad count"; exit 1; }
           for l in $SAMPLE_LIBS; do [[ "$l" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "bad library $l"; exit 1; }; done
@@ -131,7 +162,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The sample as statements ($(wc -l < "$RUNNER_TEMP/names.txt") theorems of $SAMPLE_LIBS, seed $SAMPLE_SEED)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample without the names the exporter did not find, and its topics (the libraries)"
-        if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true'
+        if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
           python3 tools/promote/missing.py --err "$RUNNER_TEMP/sample-stmt.err" --names "$RUNNER_TEMP/names.txt" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY'
@@ -179,8 +210,93 @@ jobs:
               v = topics[name]
               print(f"| {name} | {v['theorems']:,} | {v['own_units']:,} | {v['foundation_units_used']:,} |")
           PY
+      - name: "Layers: tengai-replay by layers (the foundation first, then the topics measured, each kernel-checked on its own)"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.WIDE_SAMPLE == 'true'
+        timeout-minutes: 240
+        run: |
+          [ -s "$RUNNER_TEMP/layers/layers.json" ] || { echo "::error::the plan of the layers failed (its step above says why)"; exit 1; }
+          [[ "$TOPICS_MEASURED" =~ ^[0-9]+$ ]] || { echo "bad topics_measured"; exit 1; }
+          (cd core && lake build tengai-replay 2>&1 | tail -3)
+          replay="$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-replay"
+          mkdir -p "$RUNNER_TEMP/layered"
+          export LEAN_PATH="$RUNNER_TEMP/layered"
+          # the layers to replay: the foundation, then K topics at evenly spaced ranks of the size of their own layer (the largest and the smallest included)
+          python3 - <<'PY' > "$RUNNER_TEMP/layer-order.txt"
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          k = int(os.environ["TOPICS_MEASURED"])
+          p = json.load(open(f"{t}/layers/layers.json", encoding="utf-8"))
+          found = [x for x in p["layers"] if x["topic"] is None]
+          tops = sorted((x for x in p["layers"] if x["topic"] is not None), key=lambda x: (-x["constants"], x["module"]))
+          ranks = sorted({round(i * (len(tops) - 1) / max(1, k - 1)) for i in range(k)}) if tops and k > 0 else []
+          for layer in found + [tops[i] for i in ranks]:
+              print(layer["module"], layer["file"], *layer["imports"])
+          PY
+          cat "$RUNNER_TEMP/layer-order.txt" | cut -d' ' -f1 | tr '\n' ' '; echo
+          : > "$RUNNER_TEMP/layer-stats.jsonl"
+          # the export is parsed once and every layer replays from the parsed file (a layer is its own process, tengai ADR-0005)
+          /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample-stmt.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+          while read -r module file imports; do
+            read -r -a wanted <<< "$imports"
+            args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
+            /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --stub-refused "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
+            echo "$module: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/layer-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+          done < "$RUNNER_TEMP/layer-order.txt"
+          find "$RUNNER_TEMP/layered" -name '*.olean' -printf '%s %P\n' | sort -k2
+      - name: "Layers: what a session loads (the cold import of the foundation and of each topic with it, over an empty session; paired rounds, tools/promote/import_time.py)"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.WIDE_SAMPLE == 'true'
+        run: |
+          cd core
+          core_path="$(lake env printenv LEAN_PATH)"
+          printf 'import Init\n' > "$RUNNER_TEMP/l-empty.lean"
+          python3 - <<'PY' > "$RUNNER_TEMP/l-sets.txt"
+          import json, os
+          t = os.environ["RUNNER_TEMP"]
+          p = json.load(open(f"{t}/layers/layers.json", encoding="utf-8"))
+          done = {line.split()[0] for line in open(f"{t}/layer-order.txt", encoding="utf-8") if line.strip()}
+          for layer in p["layers"]:
+              if layer["module"] in done:
+                  print(layer["module"].removeprefix("TengaiData.").replace(".", "_"), layer["module"])  # Foundation, Topic_Aintlib, ...
+          PY
+          args=(--runs 9 --baseline "lake env lean $RUNNER_TEMP/l-empty.lean")
+          while read -r label modules; do
+            read -r -a wanted <<< "$modules"
+            : > "$RUNNER_TEMP/l-$label.lean"; for m in "${wanted[@]}"; do printf 'import %s\n' "$m" >> "$RUNNER_TEMP/l-$label.lean"; done
+            args+=(--target "$label=lake env lean $RUNNER_TEMP/l-$label.lean")
+          done < "$RUNNER_TEMP/l-sets.txt"
+          LEAN_PATH="$RUNNER_TEMP/layered:$core_path" python3 ../tools/promote/import_time.py compare "${args[@]}" > "$RUNNER_TEMP/l-compare.json"
+          cd ..
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY" "$RUNNER_TEMP/layers-load.md"
+          import json, os, tomllib
+          t = os.environ["RUNNER_TEMP"]
+          p = json.load(open(f"{t}/layers/layers.json", encoding="utf-8"))
+          by_module = {x["module"]: x for x in p["layers"]}
+          size = {m: os.path.getsize(f"{t}/layered/" + m.replace(".", "/") + ".olean") for m in by_module if os.path.exists(f"{t}/layered/" + m.replace(".", "/") + ".olean")}
+          cmp = json.load(open(f"{t}/l-compare.json", encoding="utf-8"))
+          empty = cmp["baseline"]
+          cap = tomllib.load(open("perf-budget.toml", "rb"))["load"]["cap_net_median_s"]
+          rows = []
+          for line in open(f"{t}/l-sets.txt", encoding="utf-8"):
+              label, *mods = line.split()
+              loaded = set()
+              for m in mods:
+                  loaded.add(m)
+                  loaded.update(by_module[m]["imports"])
+              consts = sum(by_module[m]["constants"] for m in loaded)
+              rows.append((label, consts, sum(size[m] for m in loaded) / 1e6, cmp[label]))
+          print("## what a session loads: the foundation, and a topic with it")
+          print("| imports | constants loaded | olean MB loaded | cold import, median (s) | net over an empty module, paired median (s) | net, fastest runs (s) |")
+          print("|---|---:|---:|---:|---:|---:|")
+          for label, consts, mb, r in rows:
+              print(f"| {label} | {consts:,} | {mb:.1f} | {r['median']} | {r['net_median']:.3f} | {r['net_min']:.3f} |")
+          print(f"\nan empty module: median {empty['median']} s, fastest {empty['min']} s ({len(cmp['runs']['baseline'])} paired rounds); cap C_load {cap} s (net, paired median)")
+          over = [label for label, _, _, r in rows if r["net_median"] > cap]
+          print(f"sessions over the cap: {', '.join(over) if over else 'none'}")
+          json.dump({"rows": [[label, c, mb, r] for label, c, mb, r in rows], "empty": empty, "olean": size, "cap": cap}, open(f"{t}/layers-load.json", "w", encoding="utf-8"))
+          PY
       - name: "The sample's export, compressed, with its names and topics (a later job replays it without Tengoku)"
-        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true'
+        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
           mkdir -p "$RUNNER_TEMP/kept"
           zstd -3 -T0 -q "$RUNNER_TEMP/sample-stmt.ndjson" -o "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
@@ -189,7 +305,7 @@ jobs:
           done
           ls -l "$RUNNER_TEMP/kept"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true'
+        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         with:
           name: statements-export-${{ github.run_id }}
           path: ${{ runner.temp }}/kept/*
@@ -197,7 +313,7 @@ jobs:
           compression-level: 0   # the export is already compressed (zstd)
           if-no-files-found: error
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
-        if: env.TREE == 'true'
+        if: env.TREE == 'true' && env.EXPORT_RUN == ''
         working-directory: .tengoku
         run: |
           read -ra mods <<< "$MODULES"
@@ -253,6 +369,11 @@ jobs:
             ${{ runner.temp }}/layers/layers.json
             ${{ runner.temp }}/layers-time.txt
             ${{ runner.temp }}/missing-names.txt
+            ${{ runner.temp }}/layers-load.json
+            ${{ runner.temp }}/layers-load.md
+            ${{ runner.temp }}/layer-stats.jsonl
+            ${{ runner.temp }}/layer-order.txt
+            ${{ runner.temp }}/tables-time.txt
             ${{ runner.temp }}/replay-*-time.txt
             ${{ runner.temp }}/import-*.json
           retention-days: 30
