@@ -5,7 +5,10 @@
 
 A promotion that is one module is loaded whole by every session. A promotion in LAYERS is a foundation layer, holding the constants more than one topic needs, and one layer per topic, holding the constants only
 that topic needs; every layer imports the layers it depends on, and a session imports the layers of its topic and nothing else (tengai ADR-0005, "Layers"; `tengai-replay --import` and `--only` are the
-mechanism). TOPICS.json is `{"<topic>": ["a.theorem.name", ...]}`. The CLOSURE of a topic is every constant its theorems reach, transitively, through types and values (the whole closure the kernel needs, not the
+mechanism). TOPICS.json is `{"<topic>": ["a.theorem.name", ...]}`. A topic name with slashes places the topic in a TREE: `Seed/Algebra` is the leaf `Algebra` of the group `Seed` (a name without a slash is a leaf of
+the root, which is how a flat set of topics is read, and the plan is then what it always was). A constant belongs to the lowest node of the tree that holds every topic that needs it: one topic, its own layer;
+topics of one group, the layer of the group (`TengaiData.Group.Seed`); topics of two groups, the node above them, up to the foundation. A layer imports every layer above it that exists, so a session for a topic loads
+the foundation, the groups above the topic, and the topic. The CLOSURE of a topic is every constant its theorems reach, transitively, through types and values (the whole closure the kernel needs, not the
 reduced one of closure.py: padding that a proof does not use is still in the term the kernel checks). A constant's layer is decided by the set of topics whose closure holds it:
 
   one topic            that topic's layer
@@ -142,16 +145,39 @@ def module_component(topic: str) -> str:
     return parts
 
 
+def topic_path(topic: str) -> tuple[str, ...]:
+    """a topic's place in the tree: `Seed/Algebra` is the leaf `Algebra` of the group `Seed`; a name without a slash is a leaf of the root, which is how a flat set of topics is read"""
+    parts = tuple(p for p in topic.split("/") if p)
+    if not parts:
+        raise SystemExit(f"layers: the topic {topic!r} has no name")
+    return parts
+
+
 def plan(
     ex: Full, topics: dict[str, list[str]], universe: set[tuple] | None, prefix: str = "TengaiData", foundation: str = "Foundation"
 ) -> dict:
     index = {ex.name(i): i for i in ex.decl}
-    modules: dict[str, str] = {}
-    for t in topics:
-        m = module_component(t)
-        if m in modules.values():
-            raise SystemExit(f"layers: the topic {t!r} makes the module name {m}, which another topic or the foundation has")
-        modules[t] = m
+    paths = {t: topic_path(t) for t in topics}
+    leaves = set(paths.values())
+    for t, p in paths.items():
+        for k in range(1, len(p)):
+            if p[:k] in leaves:
+                raise SystemExit(
+                    f"layers: the topic {t!r} lies below the topic {'/'.join(p[:k])!r}: a topic is a leaf of the tree, not a group"
+                )
+
+    def component(path: tuple[str, ...]) -> str:
+        return ".".join(module_component(c) for c in path)
+
+    leaf_module: dict[tuple[str, ...], str] = {}
+    for t, p in paths.items():
+        module = f"{prefix}.Topic.{component(p)}"
+        if module in leaf_module.values():
+            raise SystemExit(f"layers: the topic {t!r} makes the module name {module}, which another topic or the foundation has")
+        leaf_module[p] = module
+    groups = sorted({p[:k] for p in paths.values() for k in range(1, len(p))}, key=lambda g: (len(g), g))
+    group_module = {g: f"{prefix}.Group.{component(g)}" for g in groups}
+    node_module = {(): f"{prefix}.{foundation}", **group_module, **leaf_module}
     placed = {u for u in ex.members if universe is None or tuple(ex.components(u)) in universe}
     roots: dict[str, set[int]] = {}
     for t, names in topics.items():
@@ -160,60 +186,106 @@ def plan(
             raise SystemExit(f"layers: {len(missing)} theorems of the topic {t!r} are not in the export: {missing[:5]}")
         roots[t] = {ex.unit_of[index[n]] for n in names}
     users: dict[int, int] = {}
-    for bit, t in enumerate(topics):
+    order = list(topics)
+    for bit, t in enumerate(order):
         for u in ex.unit_closure(roots[t]):
             if u in placed:
                 users[u] = users.get(u, 0) | (1 << bit)
-    layer_of: dict[int, str] = {}
-    order = list(topics)
-    for u, mask in users.items():
-        layer_of[u] = foundation if mask & (mask - 1) else order[mask.bit_length() - 1]
+    # a constant belongs to the lowest node of the tree that holds every topic that needs it: one topic, its own layer; topics of one group, the layer of the group; topics of two groups, the group above them, up to the
+    # foundation (the root). A constant is used by every topic that uses anything depending on it, so what it depends on lies at or above its own node: a layer imports only the layers above it.
+    lca: dict[int, tuple[str, ...]] = {}
+
+    def node_of(mask: int) -> tuple[str, ...]:
+        node = lca.get(mask)
+        if node is None:
+            common: tuple[str, ...] | None = None
+            m = mask
+            while m and common != ():
+                low = m & -m
+                p = paths[order[low.bit_length() - 1]]
+                if common is None:
+                    common = p
+                else:
+                    k = 0
+                    while k < min(len(common), len(p)) and common[k] == p[k]:
+                        k += 1
+                    common = common[:k]
+                m ^= low
+            node = lca[mask] = common or ()
+        return node
+
+    layer_of: dict[int, tuple[str, ...]] = {u: node_of(mask) for u, mask in users.items()}
     for u, layer in layer_of.items():  # the property the layers stand on, checked for every constant
         for d in ex.unit_direct(u) & placed:
-            if layer_of.get(d) not in (foundation, layer):
-                raise SystemExit(f"layers: {ex.name(u)} is in layer {layer} but depends on {ex.name(d)}, which is in {layer_of.get(d)}")
+            above = layer_of.get(d)
+            if above is None or layer[: len(above)] != above:
+                raise SystemExit(
+                    f"layers: {ex.name(u)} is in layer {node_module[layer]} but depends on {ex.name(d)}, which is in {node_module.get(above)}"
+                )
+    by_node: dict[tuple[str, ...], list[int]] = {}
+    for u, node in layer_of.items():
+        by_node.setdefault(node, []).append(u)
+    leaf_rank = {p: i for i, p in enumerate(paths[t] for t in order)}
+    nodes = sorted(by_node, key=lambda n: (len(n), n not in groups and n != (), leaf_rank.get(n, 0), n))
+    topic_of = {p: t for t, p in paths.items()}
     out_layers: list[dict] = []
     names_out: dict[str, list[list]] = {}
-    for layer in [foundation, *order]:
-        units = sorted((u for u, name in layer_of.items() if name == layer), key=lambda u: ex.name(u))
-        if not units:
-            continue
-        module = f"{prefix}.{foundation}" if layer == foundation else f"{prefix}.Topic.{modules[layer]}"
+    for node in nodes:
+        units = sorted(by_node[node], key=lambda u: ex.name(u))
+        module = node_module[node]
         names_out[module] = [ex.components(u) for u in units]
-        out_layers.append(
-            {
-                "module": module,
-                "topic": None if layer == foundation else layer,
-                "imports": []
-                if layer == foundation
-                else ([f"{prefix}.{foundation}"] if any(x == foundation for x in layer_of.values()) else []),
-                "units": len(units),
-                "constants": sum(len(ex.members[u]) for u in units),
-                "terms": sum(ex.unit_terms[u] for u in units),
-                "file": f"{module}.names.jsonl",
-            }
-        )
-    per_topic = {}
-    for t in order:
-        own = sum(1 for u, name in layer_of.items() if name == t)
-        shared = sum(1 for u, name in layer_of.items() if name == foundation and users[u] >> order.index(t) & 1)
-        per_topic[t] = {
-            "module": f"{prefix}.Topic.{modules[t]}",
-            "theorems": len(topics[t]),
-            "own_units": own,
-            "foundation_units_used": shared,
-            "units_loaded": own + shared,
-            "terms_loaded": sum(
-                ex.unit_terms[u] for u, name in layer_of.items() if name == t or (name == foundation and users[u] >> order.index(t) & 1)
-            ),
+        above = [
+            node_module[node[:k]] for k in range(len(node)) if node[:k] in by_node
+        ]  # the layers above that exist, the foundation first
+        layer = {
+            "module": module,
+            "topic": topic_of.get(node),
+            "imports": above,
+            "units": len(units),
+            "constants": sum(len(ex.members[u]) for u in units),
+            "terms": sum(ex.unit_terms[u] for u in units),
+            "file": f"{module}.names.jsonl",
         }
+        if node in groups:
+            layer["group"] = "/".join(node)
+        out_layers.append(layer)
+    per_topic = {}
+    own = {t: len(by_node.get(paths[t], [])) for t in order}
+    own_terms = {t: sum(ex.unit_terms[u] for u in by_node.get(paths[t], [])) for t in order}
+    root_used = dict.fromkeys(order, 0)
+    shared_used = dict.fromkeys(order, 0)
+    shared_terms = dict.fromkeys(order, 0)
+    for u, node in layer_of.items():
+        if node in leaves:
+            continue
+        m = users[u]
+        while m:
+            low = m & -m
+            t = order[low.bit_length() - 1]
+            shared_used[t] += 1
+            shared_terms[t] += ex.unit_terms[u]
+            if node == ():
+                root_used[t] += 1
+            m ^= low
+    for t in order:
+        entry = {
+            "module": leaf_module[paths[t]],
+            "theorems": len(topics[t]),
+            "own_units": own[t],
+            "foundation_units_used": root_used[t],
+            "units_loaded": own[t] + shared_used[t],
+            "terms_loaded": own_terms[t] + shared_terms[t],
+        }
+        if groups:
+            entry["group_units_used"] = shared_used[t] - root_used[t]  # what the groups above the topic hold of what it uses
+        per_topic[t] = entry
     total = len(layer_of)
     return {
         "layers": out_layers,
         "topics": per_topic,
         "totals": {
             "units": total,
-            "foundation_units": sum(1 for x in layer_of.values() if x == foundation),
+            "foundation_units": len(by_node.get((), [])),
             "constants": sum(len(ex.members[u]) for u in layer_of),
             "terms": sum(ex.unit_terms[u] for u in layer_of),
             "kinds": dict(sorted(Counter(ex.decl_kind[u] for u in layer_of).items())),  # the units by the kind of their first constant
