@@ -332,6 +332,37 @@ class ManifestLayers(unittest.TestCase):
             self.assertEqual(m["indexes"]["layers"], {"placed": 1, "unplaced": 0})
             self.assertEqual(sorted(m["indexes"]["files"]), ["layers-stats.json", "layers.jsonl"])
 
+    def test_the_faithfulness_check_is_recorded_when_it_ran_and_null_when_it_did_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            )  # it did not run: null, never true
+            report = {
+                "names": 10,
+                "not_asked": 2,
+                "compared": 8,
+                "absent_in_both": 0,
+                "statement_stubs": 5,
+                "kept_with_value": 1,
+                "same_with_value": 1,
+                "same_without_value": 1,
+                "refused_and_stubbed": 0,
+                "by_kind": {"thm->axiom": 5},
+                "problems": {},
+                "problem_counts": {},
+                "passed": True,
+            }
+            (d / "faithful.json").write_text(json.dumps(report))
+            f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            self.assertEqual((f["names"], f["compared"], f["statement_stubs"], f["kept_with_value"], f["not_asked"]), (10, 8, 5, 1, 2))
+            self.assertEqual((f["problems"], f["ok"]), ({}, True))
+            report.update({"passed": False, "problem_counts": {"type_differs": 3}})
+            (d / "faithful.json").write_text(json.dumps(report))
+            f = M.build_layers(d, d / "layered", {}, flavor="statements")["checks"]["faithful"]
+            self.assertEqual((f["problems"], f["ok"]), ({"type_differs": 3}, False))
+
     def test_the_manifest_is_the_same_for_the_same_inputs_and_main_writes_it(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)

@@ -55,6 +55,10 @@ on:
         description: "How many topics layers_replay replays and measures: the largest, the smallest and evenly spaced ranks between (as many as there are topics: all of them)"
         required: true
         default: "10"
+      source_hashes:
+        description: "In a run that exports (no export_run) with layers: also read, in Tengoku's environment, the hashes of the first constant of every unit of the layers (tengai-typeinfo --hashes) and keep them with the export, for the faithfulness check of a later replay. true or false"
+        required: true
+        default: "false"
       pack:
         description: "With layers_replay and all the topics replayed: the layers index, the manifest (flavor statements), one tar compressed with zstd, verified and imported from its unpacked copy, kept as an artifact. true or false"
         required: true
@@ -75,6 +79,7 @@ env:
   LAYERS_REPLAY: ${{ inputs.layers_replay }}
   TOPICS_MEASURED: ${{ inputs.topics_measured }}
   PACK: ${{ inputs.pack }}
+  SOURCE_HASHES: ${{ inputs.source_hashes }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -149,6 +154,7 @@ jobs:
             if [ -f "$RUNNER_TEMP/kept/$f" ]; then cp "$RUNNER_TEMP/kept/$f" "$RUNNER_TEMP/$f"; fi
           done
           rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
+          if [ -f "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" -o "$RUNNER_TEMP/source-hashes.jsonl"; fi
           ls -l "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/topics.json"
           { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $(wc -l < "$RUNNER_TEMP/names.txt") names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample as statements (by default the wide sample of the transplant runs): the same roots, theorems as axioms unless a definition's value mentions them"
@@ -310,6 +316,24 @@ jobs:
               print(f"the slowest of them: {worst[0]}, {worst[1]:,} constants, +{worst[3]['net_median']:.3f} s")
           json.dump({"rows": [[label, mb, {**r, "constants": c}] for label, c, mb, r in rows], "empty": empty, "olean": size, "cap": cap}, open(f"{t}/layers-load.json", "w", encoding="utf-8"))
           PY
+      - name: "Faithful: the same records in the snapshot's environment, compared with the source's"
+        if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.WIDE_SAMPLE == 'true'
+        run: |
+          if [ ! -s "$RUNNER_TEMP/source-hashes.jsonl" ]; then
+            echo "::notice::the export of run $EXPORT_RUN has no source hashes (a run with source_hashes=true makes them): the faithfulness check did not run"
+            exit 0
+          fi
+          # the names of the layers that were replayed
+          : > "$RUNNER_TEMP/replayed-names.jsonl"
+          while read -r _ file _; do cat "$RUNNER_TEMP/layers/$file" >> "$RUNNER_TEMP/replayed-names.jsonl"; done < "$RUNNER_TEMP/layer-order.txt"
+          wc -l "$RUNNER_TEMP/replayed-names.jsonl"
+          (cd core && lake build tengai-typeinfo 2>&1 | tail -3)
+          core_path="$(cd core && lake env printenv LEAN_PATH)"
+          read -ra mods < <(cut -d' ' -f1 "$RUNNER_TEMP/layer-order.txt" | tr '\n' ' ')
+          LEAN_PATH="$RUNNER_TEMP/layered:$core_path" /usr/bin/time -v core/.lake/build/bin/tengai-typeinfo --hashes "$RUNNER_TEMP/replayed-names.jsonl" "${mods[@]}" > "$RUNNER_TEMP/snapshot-hashes.jsonl" 2> "$RUNNER_TEMP/snapshot-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/snapshot-hashes-time.txt"; exit 1; }
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/snapshot-hashes-time.txt" | tr -s '\t' ' '
+          { echo "### Faithful: the snapshot against Tengoku's environment"; echo; echo '```'; python3 tools/promote/faithful.py "$RUNNER_TEMP/source-hashes.jsonl" "$RUNNER_TEMP/snapshot-hashes.jsonl" --only-in-snapshot --out "$RUNNER_TEMP/faithful.json" || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 -c 'import json,os,sys; sys.exit(0 if json.load(open(os.environ["RUNNER_TEMP"] + "/faithful.json"))["passed"] else 1)'
       - name: "The snapshot: the layers index, the manifest, one tar compressed with zstd, verified, and imported from its unpacked copy"
         if: env.LAYERS == 'true' && env.LAYERS_REPLAY == 'true' && env.PACK == 'true' && env.WIDE_SAMPLE == 'true'
         run: |
@@ -391,9 +415,20 @@ jobs:
             ${{ runner.temp }}/zstd-sha256.txt
             ${{ runner.temp }}/pack.json
             ${{ runner.temp }}/verify.json
+            ${{ runner.temp }}/faithful.json
           retention-days: 30
           compression-level: 0   # the snapshot is already compressed (zstd)
           if-no-files-found: error
+      - name: "The source's hashes: tengai-typeinfo --hashes in Tengoku's environment over the first constant of every unit of the layers"
+        if: env.LAYERS == 'true' && env.SOURCE_HASHES == 'true' && env.EXPORT_RUN == '' && env.WIDE_SAMPLE == 'true'
+        run: |
+          (cd core && lake build tengai-typeinfo 2>&1 | tail -3)
+          cat "$RUNNER_TEMP"/layers/*.names.jsonl > "$RUNNER_TEMP/all-names.jsonl"
+          wc -l "$RUNNER_TEMP/all-names.jsonl"
+          cd .tengoku
+          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-typeinfo" --hashes "$RUNNER_TEMP/all-names.jsonl" Tengoku.All > "$RUNNER_TEMP/source-hashes.jsonl" 2> "$RUNNER_TEMP/source-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/source-hashes-time.txt"; exit 1; }
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/source-hashes-time.txt" | tr -s '\t' ' '
+          echo "source records: $(wc -l < "$RUNNER_TEMP/source-hashes.jsonl"), missing in Tengoku's environment: $(grep -c '"missing":true' "$RUNNER_TEMP/source-hashes.jsonl" || true)"
       - name: "The sample's export, compressed, with its names and topics (a later job replays it without Tengoku)"
         if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
@@ -402,6 +437,7 @@ jobs:
           for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json; do
             if [ -f "$RUNNER_TEMP/$f" ]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/kept/$f"; fi
           done
+          if [ -f "$RUNNER_TEMP/source-hashes.jsonl" ]; then zstd -3 -T0 -q "$RUNNER_TEMP/source-hashes.jsonl" -o "$RUNNER_TEMP/kept/source-hashes.jsonl.zst"; fi
           ls -l "$RUNNER_TEMP/kept"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
@@ -470,6 +506,9 @@ jobs:
             ${{ runner.temp }}/missing-names.txt
             ${{ runner.temp }}/layers-load.json
             ${{ runner.temp }}/layers-load.md
+            ${{ runner.temp }}/faithful.json
+            ${{ runner.temp }}/source-hashes-time.txt
+            ${{ runner.temp }}/snapshot-hashes-time.txt
             ${{ runner.temp }}/layer-stats.jsonl
             ${{ runner.temp }}/layer-order.txt
             ${{ runner.temp }}/tables-time.txt
