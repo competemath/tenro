@@ -63,6 +63,10 @@ on:
         description: "In a run that exports (no export_run) with layers: also read, in Tengoku's environment, the extension entries of every constant of the layers (tengai-extinfo: reducibility, projections, structures, classes, instances, and the binder annotations of the source) and keep them with the export; a replay with layers_replay then puts them back (tengai-replay --ext), so that a session can elaborate with the instances and the structure notation of the source. true or false"
         required: true
         default: "false"
+      scoped_instances:
+        description: "With the extension entries (ext_rows of the export): register the instances as SCOPED to the namespace of each layer's module (tengai-replay --scoped-instances; a session opens the namespace of the layers it wants active: invariant I4, visible but not active) instead of global (active as soon as the layer is imported, as in the transplant flavor). true or false"
+        required: true
+        default: "false"
       sample_mode:
         description: "manifests (the theorems of the intake manifests, tools/promote/pick.py) or tree (every theorem of the whole tree, topics by module path: Seed/<area> and Intake/<library>, a tree for layers.py; no names file, the whole tree is exported)"
         required: true
@@ -98,6 +102,7 @@ env:
   DROP_PROOFS: ${{ inputs.drop_proofs }}
   SOURCE_HASHES: ${{ inputs.source_hashes }}
   EXT_ROWS: ${{ inputs.ext_rows }}
+  SCOPED_INSTANCES: ${{ inputs.scoped_instances }}
   SAMPLE_MODE: ${{ inputs.sample_mode }}
   SEED_DEPTH: ${{ inputs.seed_depth }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
@@ -300,7 +305,10 @@ jobs:
           while read -r module file imports; do
             read -r -a wanted <<< "$imports"
             args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
-            if [ -s "$RUNNER_TEMP/ext/$module.ext.jsonl" ]; then args+=(--ext "$RUNNER_TEMP/ext/$module.ext.jsonl"); fi
+            if [ -s "$RUNNER_TEMP/ext/$module.ext.jsonl" ]; then
+              args+=(--ext "$RUNNER_TEMP/ext/$module.ext.jsonl")
+              if [ "$SCOPED_INSTANCES" = true ]; then args+=(--scoped-instances); fi
+            fi
             /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --stub-refused "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
             echo "$module: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/layer-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
           done < "$RUNNER_TEMP/layer-order.txt"
@@ -404,7 +412,7 @@ jobs:
           tengai_tag="$(python3 -c 'import json; print(json.load(open("core.lock"))["tag"])')"
           echo "pins: tenro $src_sha, Tengoku $tengoku_pin, exporter patch $patch_sha, tengai $tengai_tag"
           python3 tools/promote/layer_index.py --layers "$RUNNER_TEMP/layers" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/indexes" | tee -a "$GITHUB_STEP_SUMMARY"
-          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
+          python3 tools/promote/manifest.py layers --dir "$RUNNER_TEMP" --layered "$RUNNER_TEMP/layered" --out "$RUNNER_TEMP/manifest.json" --flavor statements --indexes "$RUNNER_TEMP/indexes" --pin "tengoku=$tengoku_pin" --pin "tengai=$tengai_tag" --pin "lean4export=$LEAN4EXPORT_COMMIT" --pin "export_patch_sha256=$patch_sha" --pin "drop_proofs=${DROP_PROOFS:-false}" --pin "scoped_instances=${SCOPED_INSTANCES:-false}" --pin "tenro_export_commit=$src_sha" --pin "export_run=${EXPORT_RUN:-$GITHUB_RUN_ID}"
           # the export and the parsed tables are not needed any more (the runner's disk)
           rm -f "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/tables.olean"
           python3 tools/release/pack.py pack --olean-dir "$RUNNER_TEMP/layered" --manifest "$RUNNER_TEMP/manifest.json" --indexes "$RUNNER_TEMP/indexes" --out "$RUNNER_TEMP/snapshot.tar" | tee "$RUNNER_TEMP/pack.json"
