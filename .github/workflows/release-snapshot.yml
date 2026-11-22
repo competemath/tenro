@@ -12,6 +12,10 @@ on:
       tag:
         description: "The tag: snapshot-<name> (letters, digits, dot, dash, underscore); never a version"
         required: true
+      dry_run:
+        description: "true (the default): do everything but create the release (the archive is verified, the gates run, the notes and the attribution are kept as an artifact); false: publish"
+        required: true
+        default: "true"
 permissions: {}
 concurrency:
   group: release-snapshot
@@ -22,6 +26,7 @@ defaults:
 env:
   RUN_ID: ${{ inputs.run_id }}
   TAG: ${{ inputs.tag }}
+  DRY_RUN: ${{ inputs.dry_run }}
   GH_TOKEN: ${{ github.token }}
 jobs:
   release:
@@ -38,6 +43,7 @@ jobs:
         run: |
           [[ "$RUN_ID" =~ ^[0-9]{1,20}$ ]] || { echo "::error::bad run_id"; exit 1; }
           [[ "$TAG" =~ ^snapshot-[A-Za-z0-9._-]{1,60}$ ]] || { echo "::error::the tag must be snapshot-<name>"; exit 1; }
+          [[ "$DRY_RUN" = true || "$DRY_RUN" = false ]] || { echo "::error::dry_run is true or false"; exit 1; }
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then echo "::error::a release $TAG exists already"; exit 1; fi
           if git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/$TAG" >/dev/null 2>&1; then echo "::error::a tag $TAG exists already"; exit 1; fi
       - name: The artifact of the run, and its archive verified
@@ -58,7 +64,18 @@ jobs:
           cat "$RUNNER_TEMP/notes.md" | tee -a "$GITHUB_STEP_SUMMARY"
           (cd "$RUNNER_TEMP/snap" && sha256sum snapshot.tar.zst manifest.json > "$RUNNER_TEMP/SHA256SUMS")
           cp "$RUNNER_TEMP/SHA256SUMS" "$RUNNER_TEMP/snap/SHA256SUMS"
+      - name: The notes and the attribution, kept (a dry run publishes nothing)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-snapshot-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/notes.md
+            ${{ runner.temp }}/ATTRIBUTION.md
+            ${{ runner.temp }}/SHA256SUMS
+            ${{ runner.temp }}/verify.json
+          retention-days: 30
       - name: The pre-release
+        if: env.DRY_RUN == 'false'
         run: |
           gh release create "$TAG" "$RUNNER_TEMP/snap/snapshot.tar.zst" "$RUNNER_TEMP/snap/manifest.json" "$RUNNER_TEMP/ATTRIBUTION.md" "$RUNNER_TEMP/SHA256SUMS" \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TAG: Tengoku's statements as a layered snapshot (experimental)" --notes-file "$RUNNER_TEMP/notes.md" --prerelease
