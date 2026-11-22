@@ -174,7 +174,8 @@ jobs:
           rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
           if [ -f "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" -o "$RUNNER_TEMP/source-hashes.jsonl"; fi
           ls -l "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/topics.json"
-          { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $(wc -l < "$RUNNER_TEMP/names.txt") names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
+          names=none; if [ -f "$RUNNER_TEMP/names.txt" ]; then names="$(wc -l < "$RUNNER_TEMP/names.txt")"; fi   # the export of a whole tree (sample_mode=tree) names nothing: it has every constant
+          { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $names names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample as statements (by default the wide sample of the transplant runs): the same roots, theorems as axioms unless a definition's value mentions them"
         if: env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == '' && env.SAMPLE_MODE != 'tree'
         run: |
