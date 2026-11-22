@@ -199,6 +199,10 @@ jobs:
           for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json attribution.json tree-roots.json; do
             if [ -f "$RUNNER_TEMP/kept/$f" ]; then cp "$RUNNER_TEMP/kept/$f" "$RUNNER_TEMP/$f"; fi
           done
+          # the libraries the export left out are not named in the attribution (an export made before the filter existed names them; dropping twice changes nothing)
+          if [ -s "$RUNNER_TEMP/attribution.json" ] && [ -s "$RUNNER_TEMP/tree-roots.json" ]; then
+            python3 tools/promote/attribution.py --filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
           if [ -f "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" -o "$RUNNER_TEMP/source-hashes.jsonl"; fi
           if [ -f "$RUNNER_TEMP/kept/ext.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/ext.jsonl.zst" -o "$RUNNER_TEMP/ext.jsonl"; fi
@@ -260,6 +264,10 @@ jobs:
           sample_args=(--sample "$RUNNER_TEMP/sample.jsonl")
           if [ "$SAMPLE_MODE" = tree ]; then sample_args=(); fi   # the topics of a tree are not the libraries' keys: every library of the intake is listed
           python3 tools/promote/attribution.py --intake .tengoku/data/intake --sources .tengoku/schemas/sources.json "${sample_args[@]}" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          # a snapshot that leaves libraries out holds none of their content: the attribution (and with it the licence texts, the notes and the gate) must not name them either
+          if [ "$SAMPLE_MODE" = tree ] && [ -s "$RUNNER_TEMP/tree-roots.json" ]; then
+            python3 tools/promote/attribution.py --filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
         if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
         continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe

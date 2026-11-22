@@ -337,3 +337,21 @@ def test_the_tree_step_checks_the_environment_of_the_kept_roots_before_it_export
     check = run.index('tree_roots.py --check-modules "$RUNNER_TEMP/env-modules.txt" --report "$RUNNER_TEMP/tree-roots.json"')
     export = run.index("lean4export")
     assert check < export, "a leak is found before the 25-minute export, not after it"
+
+
+def test_the_attribution_does_not_name_a_library_that_was_left_out_at_export_time_and_at_replay_time():
+    users = [(n, r) for n, r in runs() if "attribution.py --filter" in r]
+    assert len(users) == 2, "the export makes it from the intake and filters it; a replay of an earlier export filters what it downloaded"
+    for name, run in users:
+        assert (
+            '--filter "$RUNNER_TEMP/attribution.json" --exclude-report "$RUNNER_TEMP/tree-roots.json" --out "$RUNNER_TEMP/attribution.json"'
+            in run
+        ), name
+        assert '[ -s "$RUNNER_TEMP/tree-roots.json" ]' in run, (
+            f"{name!r}: no report (an export of the whole tree, or of before the report existed) is no filter"
+        )
+    export = next(r for n, r in users if n.startswith("Attribution"))
+    assert export.index("--intake") < export.index("attribution.py --filter"), "filtered after it is made"
+    assert '"$SAMPLE_MODE" = tree' in export
+    replay = next(r for n, r in users if n.startswith("The export of an earlier run"))
+    assert replay.index("for f in names.txt") < replay.index("attribution.py --filter"), "filtered after the kept files are copied back"
