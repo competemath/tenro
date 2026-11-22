@@ -333,7 +333,7 @@ jobs:
           wc -l "$RUNNER_TEMP/replayed-names.jsonl"
           (cd core && lake build tengai-typeinfo 2>&1 | tail -3)
           core_path="$(cd core && lake env printenv LEAN_PATH)"
-          read -ra mods < <(cut -d' ' -f1 "$RUNNER_TEMP/layer-order.txt" | tr '\n' ' ')
+          mapfile -t mods < <(cut -d' ' -f1 "$RUNNER_TEMP/layer-order.txt")   # not `read -ra` from `tr '\n' ' '`: read returns 1 at an end of file without a newline and `set -e` ends the step without a word
           LEAN_PATH="$RUNNER_TEMP/layered:$core_path" /usr/bin/time -v core/.lake/build/bin/tengai-typeinfo --hashes "$RUNNER_TEMP/replayed-names.jsonl" "${mods[@]}" > "$RUNNER_TEMP/snapshot-hashes.jsonl" 2> "$RUNNER_TEMP/snapshot-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/snapshot-hashes-time.txt"; exit 1; }
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/snapshot-hashes-time.txt" | tr -s '\t' ' '
           { echo "### Faithful: the snapshot against Tengoku's environment"; echo; echo '```'; python3 tools/promote/faithful.py "$RUNNER_TEMP/source-hashes.jsonl" "$RUNNER_TEMP/snapshot-hashes.jsonl" --only-in-snapshot --out "$RUNNER_TEMP/faithful.json" || true; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"

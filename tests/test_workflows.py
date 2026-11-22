@@ -41,3 +41,12 @@ def test_workflow_conventions(path):
                 in_run = False
             else:
                 assert "${{" not in ln, f"line {i + 1}: move the expression into env: and use the shell variable"
+
+
+@pytest.mark.parametrize("path", WF, ids=lambda p: p.name)
+def test_no_read_of_an_array_from_a_stream_without_a_final_newline(path):
+    """`read -ra x < <(... | tr '\\n' ' ')` returns 1 (the end of the file came before a newline) and `set -e` ends the step silently: the faithfulness step of the first real replay run died so, a minute
+    after its build, after 55 minutes of work. mapfile reads lines and returns 0."""
+    for i, ln in enumerate(path.read_text().splitlines(), start=1):
+        if re.search(r"\bread\b[^|<]*<\s*<\(", ln) and (re.search(r"\bread\s+-[a-z]*a", ln) or re.search(r"tr\s+(-d\s+)?'\\n'", ln)):
+            pytest.fail(f"{path.name}:{i}: use mapfile -t, not read, to fill an array from a stream: {ln.strip()[:100]}")
