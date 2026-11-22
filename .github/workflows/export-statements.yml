@@ -39,6 +39,10 @@ on:
         description: "Plan the layers of the sample (a foundation, the constants more than one library needs, and one layer per library; tools/promote/layers.py): the sizes only, nothing is replayed. true or false"
         required: true
         default: "false"
+      keep_export:
+        description: "Keep the sample's export (zstd, with its names and topics) as an artifact, so that a later job replays it without Tengoku: no setup, no export. true or false"
+        required: true
+        default: "false"
 permissions: {}
 concurrency:
   group: export-statements
@@ -50,6 +54,7 @@ env:
   MODULES: ${{ inputs.modules }}
   REPLAY: ${{ inputs.replay }}
   LAYERS: ${{ inputs.layers }}
+  KEEP_EXPORT: ${{ inputs.keep_export }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
   SAMPLE_LIBS: ${{ inputs.sample_libraries }}
   SAMPLE_COUNT: ${{ inputs.sample_count }}
@@ -125,9 +130,8 @@ jobs:
           echo "PANIC lines: $(grep -cE '^PANIC' "$RUNNER_TEMP/sample-stmt.err" || true)"
           cd "$GITHUB_WORKSPACE"
           python3 tools/export/export_stats.py "$RUNNER_TEMP/sample-stmt.ndjson" --time-log "$RUNNER_TEMP/sample-stmt.err" --label "The sample as statements ($(wc -l < "$RUNNER_TEMP/names.txt") theorems of $SAMPLE_LIBS, seed $SAMPLE_SEED)" --out "$RUNNER_TEMP/sample-stmt-stats.json" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
-        if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
-        continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe
+      - name: "The sample without the names the exporter did not find, and its topics (the libraries)"
+        if: (env.LAYERS == 'true' || env.KEEP_EXPORT == 'true') && env.WIDE_SAMPLE == 'true'
         run: |
           python3 tools/promote/missing.py --err "$RUNNER_TEMP/sample-stmt.err" --names "$RUNNER_TEMP/names.txt" --sample "$RUNNER_TEMP/sample.jsonl" --out "$RUNNER_TEMP/missing-names.txt" | tee -a "$GITHUB_STEP_SUMMARY"
           python3 - <<'PY'
@@ -141,6 +145,10 @@ jobs:
           json.dump(topics, open(f"{t}/topics.json", "w", encoding="utf-8"))
           print("topics:", len(topics), "libraries,", sum(len(v) for v in topics.values()), "theorems")
           PY
+      - name: "Layers: which layer each constant of the sample belongs to (a foundation, the constants more than one library needs, and one layer per library): the sizes only, nothing is replayed"
+        if: env.LAYERS == 'true' && env.WIDE_SAMPLE == 'true'
+        continue-on-error: true   # the planner reads the whole export in Python (3.1 GB for all of the intake): if it fails, the run still has its export and its replay probe
+        run: |
           /usr/bin/time -v python3 tools/promote/layers.py "$RUNNER_TEMP/sample-stmt.ndjson" --topics "$RUNNER_TEMP/topics.json" --out "$RUNNER_TEMP/layers" > "$RUNNER_TEMP/layers.out" 2> "$RUNNER_TEMP/layers-time.txt" || { tail -20 "$RUNNER_TEMP/layers-time.txt"; exit 1; }
           head -1 "$RUNNER_TEMP/layers.out"
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/layers-time.txt" | tr -s '\t' ' '
@@ -171,6 +179,23 @@ jobs:
               v = topics[name]
               print(f"| {name} | {v['theorems']:,} | {v['own_units']:,} | {v['foundation_units_used']:,} |")
           PY
+      - name: "The sample's export, compressed, with its names and topics (a later job replays it without Tengoku)"
+        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/kept"
+          zstd -3 -T0 -q "$RUNNER_TEMP/sample-stmt.ndjson" -o "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
+          for f in names.txt sample.jsonl topics.json missing-names.txt sample-stmt-stats.json; do
+            if [ -f "$RUNNER_TEMP/$f" ]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/kept/$f"; fi
+          done
+          ls -l "$RUNNER_TEMP/kept"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true'
+        with:
+          name: statements-export-${{ github.run_id }}
+          path: ${{ runner.temp }}/kept/*
+          retention-days: 30
+          compression-level: 0   # the export is already compressed (zstd)
+          if-no-files-found: error
       - name: "The whole tree as statements (lean4export --statements over the modules, no names, so every constant)"
         if: env.TREE == 'true'
         working-directory: .tengoku
