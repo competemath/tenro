@@ -51,6 +51,9 @@ MANIFEST = {
 }
 
 
+EXT = {"layers": 2, "reducibility": 11, "projections": 4, "structures": 3, "classes": 2, "instances": 1234, "failed": 0, "ok": True}
+
+
 class Gates(unittest.TestCase):
     def test_a_faithful_attributed_statements_snapshot_may_be_released(self):
         self.assertEqual(N.gates(MANIFEST), [])
@@ -68,6 +71,14 @@ class Gates(unittest.TestCase):
             m = copy.deepcopy(MANIFEST)
             break_it(m)
             self.assertNotEqual(N.gates(m), [], name)
+
+    def test_extension_entries_that_lean_refused_stop_a_release_and_none_carried_does_not(self):
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = dict(EXT, failed=3, ok=False)
+        self.assertIn("refused 3 extension entries", " ".join(N.gates(m)))
+        m["checks"]["extensions"] = EXT
+        self.assertEqual(N.gates(m), [])
+        self.assertEqual(N.gates(MANIFEST), [])  # a snapshot without them (checks.extensions absent) is released as constants only
 
     def test_a_problem_names_what_it_is(self):
         m = copy.deepcopy(MANIFEST)
@@ -94,6 +105,18 @@ class Texts(unittest.TestCase):
         ):
             self.assertIn(needle, text)
         self.assertNotIn("Combo_All", text)
+
+    def test_the_notes_say_what_extension_entries_it_carries_or_that_it_carries_none(self):
+        without = N.notes_md(MANIFEST, "snapshot-x", "1", 100, SHA)
+        self.assertIn("constants only, no instances, simp sets, notation or tactics", without)
+        self.assertNotIn("extension entries", without)
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn("1,234 instances, 2 classes, 3 structures, 4 projection functions, 11 reducibility attributes", text)
+        self.assertIn("no simp sets, notation, macros or tactics", text)
+        self.assertNotIn("constants only", text)
+        self.assertIn("refused by Lean: 0", text)
 
     def test_the_attribution_lists_every_library_with_its_repository_commit_and_licence(self):
         text = N.attribution_md(MANIFEST["attribution"], "snapshot-x")

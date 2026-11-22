@@ -59,6 +59,10 @@ on:
         description: "In a run that exports (no export_run) with layers: also read, in Tengoku's environment, the hashes of the first constant of every unit of the layers (tengai-typeinfo --hashes) and keep them with the export, for the faithfulness check of a later replay. true or false"
         required: true
         default: "false"
+      ext_rows:
+        description: "In a run that exports (no export_run) with layers: also read, in Tengoku's environment, the extension entries of every constant of the layers (tengai-extinfo: reducibility, projections, structures, classes, instances, and the binder annotations of the source) and keep them with the export; a replay with layers_replay then puts them back (tengai-replay --ext), so that a session can elaborate with the instances and the structure notation of the source. true or false"
+        required: true
+        default: "false"
       sample_mode:
         description: "manifests (the theorems of the intake manifests, tools/promote/pick.py) or tree (every theorem of the whole tree, topics by module path: Seed/<area> and Intake/<library>, a tree for layers.py; no names file, the whole tree is exported)"
         required: true
@@ -93,6 +97,7 @@ env:
   PACK: ${{ inputs.pack }}
   DROP_PROOFS: ${{ inputs.drop_proofs }}
   SOURCE_HASHES: ${{ inputs.source_hashes }}
+  EXT_ROWS: ${{ inputs.ext_rows }}
   SAMPLE_MODE: ${{ inputs.sample_mode }}
   SEED_DEPTH: ${{ inputs.seed_depth }}
   WIDE_SAMPLE: ${{ inputs.wide_sample }}
@@ -173,6 +178,7 @@ jobs:
           done
           rm -f "$RUNNER_TEMP/kept/sample-stmt.ndjson.zst"
           if [ -f "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/source-hashes.jsonl.zst" -o "$RUNNER_TEMP/source-hashes.jsonl"; fi
+          if [ -f "$RUNNER_TEMP/kept/ext.jsonl.zst" ]; then zstd -d -q "$RUNNER_TEMP/kept/ext.jsonl.zst" -o "$RUNNER_TEMP/ext.jsonl"; fi
           ls -l "$RUNNER_TEMP/sample-stmt.ndjson" "$RUNNER_TEMP/topics.json"
           names=none; if [ -f "$RUNNER_TEMP/names.txt" ]; then names="$(wc -l < "$RUNNER_TEMP/names.txt")"; fi   # the export of a whole tree (sample_mode=tree) names nothing: it has every constant
           { echo "### The export of run $EXPORT_RUN"; echo; echo "$(wc -l < "$RUNNER_TEMP/sample-stmt.ndjson") lines, $names names, $(python3 -c 'import json,os; print(len(json.load(open(os.environ["RUNNER_TEMP"] + "/topics.json"))))') topics"; } | tee -a "$GITHUB_STEP_SUMMARY"
@@ -289,9 +295,12 @@ jobs:
           # the export is parsed once and every layer replays from the parsed file (a layer is its own process, tengai ADR-0005)
           /usr/bin/time -v "$replay" "$RUNNER_TEMP/sample-stmt.ndjson" --save-tables "$RUNNER_TEMP/tables.olean" 2> "$RUNNER_TEMP/tables-time.txt" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "the parsed export: $(stat -c %s "$RUNNER_TEMP/tables.olean") bytes; $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/tables-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
+          # the extension entries of Tengoku's constants (ext_rows of the export run), split by the layer that holds each constant: a layer reads the rows it needs, not all of them
+          if [ -s "$RUNNER_TEMP/ext.jsonl" ]; then python3 tools/promote/ext_partition.py "$RUNNER_TEMP/ext.jsonl" --layers "$RUNNER_TEMP/layers" --out "$RUNNER_TEMP/ext" | tee -a "$GITHUB_STEP_SUMMARY"; fi
           while read -r module file imports; do
             read -r -a wanted <<< "$imports"
             args=(); for m in "${wanted[@]}"; do args+=(--import "$m"); done
+            if [ -s "$RUNNER_TEMP/ext/$module.ext.jsonl" ]; then args+=(--ext "$RUNNER_TEMP/ext/$module.ext.jsonl"); fi
             /usr/bin/time -v "$replay" --tables "$RUNNER_TEMP/tables.olean" --module "$module" --out "$RUNNER_TEMP/layered" --only "$RUNNER_TEMP/layers/$file" --stub-refused "${args[@]}" 2> "$RUNNER_TEMP/layer-time.txt" | tee -a "$RUNNER_TEMP/layer-stats.jsonl"
             echo "$module: $(grep -E 'Elapsed|Maximum resident' "$RUNNER_TEMP/layer-time.txt" | tr -s '\t' ' ' | tr '\n' ';')"
           done < "$RUNNER_TEMP/layer-order.txt"
@@ -473,6 +482,18 @@ jobs:
           /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-typeinfo" --hashes "$RUNNER_TEMP/all-names.jsonl" Tengoku.All > "$RUNNER_TEMP/source-hashes.jsonl" 2> "$RUNNER_TEMP/source-hashes-time.txt" || { tail -20 "$RUNNER_TEMP/source-hashes-time.txt"; exit 1; }
           grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/source-hashes-time.txt" | tr -s '\t' ' '
           echo "source records: $(wc -l < "$RUNNER_TEMP/source-hashes.jsonl"), missing in Tengoku's environment: $(grep -c '"missing":true' "$RUNNER_TEMP/source-hashes.jsonl" || true)"
+      - name: "The source's extension entries: tengai-extinfo in Tengoku's environment over every constant of the layers (the constructors and recursors of a block too)"
+        if: env.LAYERS == 'true' && env.EXT_ROWS == 'true' && env.EXPORT_RUN == '' && env.WIDE_SAMPLE == 'true'
+        run: |
+          (cd core && lake build tengai-extinfo 2>&1 | tail -3)
+          cat "$RUNNER_TEMP"/layers/*.constants.jsonl > "$RUNNER_TEMP/ext-names.jsonl"
+          wc -l "$RUNNER_TEMP/ext-names.jsonl"
+          cd .tengoku
+          /usr/bin/time -v lake env "$GITHUB_WORKSPACE/core/.lake/build/bin/tengai-extinfo" "$RUNNER_TEMP/ext-names.jsonl" Tengoku.All > "$RUNNER_TEMP/ext.jsonl" 2> "$RUNNER_TEMP/ext-time.txt" || { tail -20 "$RUNNER_TEMP/ext-time.txt"; exit 1; }
+          grep -E "extinfo:|Elapsed|Maximum resident" "$RUNNER_TEMP/ext-time.txt" | tr -s '\t' ' '
+          cd "$GITHUB_WORKSPACE"
+          # every row must belong to a layer: the split by layer is the first thing a replay does, and it refuses a row that no layer holds
+          python3 tools/promote/ext_partition.py "$RUNNER_TEMP/ext.jsonl" --layers "$RUNNER_TEMP/layers" --out "$RUNNER_TEMP/ext-check" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: "The sample's export, compressed, with its names and topics (a later job replays it without Tengoku)"
         if: env.KEEP_EXPORT == 'true' && env.WIDE_SAMPLE == 'true' && env.EXPORT_RUN == ''
         run: |
@@ -482,6 +503,7 @@ jobs:
             if [ -f "$RUNNER_TEMP/$f" ]; then cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/kept/$f"; fi
           done
           if [ -f "$RUNNER_TEMP/source-hashes.jsonl" ]; then zstd -3 -T0 -q "$RUNNER_TEMP/source-hashes.jsonl" -o "$RUNNER_TEMP/kept/source-hashes.jsonl.zst"; fi
+          if [ -f "$RUNNER_TEMP/ext.jsonl" ]; then zstd -3 -T0 -q "$RUNNER_TEMP/ext.jsonl" -o "$RUNNER_TEMP/kept/ext.jsonl.zst"; fi
           echo "${DROP_PROOFS:-false}" > "$RUNNER_TEMP/kept/drop-proofs.txt"
           ls -l "$RUNNER_TEMP/kept"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

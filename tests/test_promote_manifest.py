@@ -274,6 +274,30 @@ class ManifestLayers(unittest.TestCase):
             self.assertNotIn("cap", m["checks"]["session_load"])  # a promotion measured before the cap was recorded has none
             self.assertTrue(m["checks"]["axioms"]["standard_only"])
 
+    def test_the_extension_entries_are_summed_over_the_layers_that_carried_them_and_an_entry_lean_refused_is_not_ok(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            self.files(d)
+            m = M.build_layers(d, d / "layered", {"tengoku": "abc"})
+            self.assertEqual(
+                m["checks"]["extensions"],
+                {"layers": 2, "reducibility": 0, "projections": 0, "structures": 0, "classes": 0, "instances": 4, "failed": 0, "ok": True},
+            )
+            (d / "layer-stats.jsonl").write_text(
+                json.dumps({"ext": {"instances": 3, "classes": 2, "failed": 0}, "replay": {"added": 9, "skipped": 3}})
+                + "\n"
+                + json.dumps({"ext": {"reducibility": 7, "failed": 2}, "replay": {"added": 5, "skipped": 0}})
+                + "\n"
+            )
+            e = M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["extensions"]
+            self.assertEqual((e["instances"], e["classes"], e["reducibility"], e["failed"], e["ok"]), (3, 2, 7, 2, False))
+            (d / "layer-stats.jsonl").write_text(
+                json.dumps({"ext": None, "replay": {"added": 9}}) + "\n" + json.dumps({"ext": None, "replay": {"added": 5}}) + "\n"
+            )
+            self.assertIsNone(
+                M.build_layers(d, d / "layered", {"tengoku": "abc"})["checks"]["extensions"]
+            )  # no layer carried any: null, not zero
+
     def test_a_statements_snapshot_records_its_flavor_counts_what_was_refused_and_lists_no_theorems(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
