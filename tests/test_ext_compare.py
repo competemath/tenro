@@ -97,6 +97,24 @@ class Compare(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["kinds"]["inst"]["differs"], 1)
 
+    def test_the_keys_and_the_synthesis_order_of_an_instance_must_be_the_source_s_when_both_sides_have_them(self):
+        keys = [["c", ["Fx", "Sz"], 1], ["c", ["Nat"], 0]]
+        src = table(row(["i"], inst={"prio": 1000, "kind": "global", "keys": keys, "synth": [0]}))
+        same = table(row(["i"], inst={"prio": 1000, "kind": "global", "keys": keys, "synth": [0]}))
+        self.assertTrue(E.compare(src, same, "global")["ok"])
+        other_keys = table(
+            row(["i"], inst={"prio": 1000, "kind": "global", "keys": [["c", ["Fx", "Sz"], 1], ["c", ["Int"], 0]], "synth": [0]})
+        )
+        r = E.compare(src, other_keys, "global")
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["kinds"]["inst"], {"differs": 1})
+        other_order = table(row(["i"], inst={"prio": 1000, "kind": "global", "keys": keys, "synth": [1, 0]}))
+        self.assertFalse(E.compare(src, other_order, "global")["ok"])
+        # a row of an older tool has no keys: nothing is judged on them, on either side
+        old = table(row(["i"], inst={"prio": 1000, "kind": "global"}))
+        self.assertTrue(E.compare(src, old, "global")["ok"])
+        self.assertTrue(E.compare(old, src, "global")["ok"])
+
     def test_the_scoped_registrations_of_an_instance_are_compared_as_a_set_and_a_loss_is_a_loss(self):
         a = [{"ns": ["Pointwise"], "prio": 1000}, {"ns": ["Classical"], "prio": 10}]
         source = table(row(["i"], sinst=a))

@@ -61,6 +61,11 @@ def compare_inst(src: dict, snap: dict, mode: str) -> str:
         return "differs"
     if snap.get("kind") != mode:  # the snapshot registers every instance one way: anything else there is not what the replay does
         return "differs"
+    # the entry itself: the keys of its discrimination-tree path and its synthesis order (Tengai v0.0.22 on: `tengai-extinfo` writes them and `tengai-replay --ext` adds the entry as it is, so they must be equal);
+    # a row of an older tool has none, and nothing is judged then
+    for field in ("keys", "synth"):
+        if field in src and field in snap and src[field] != snap[field]:
+            return "differs"
     return "same" if src.get("kind") == mode else "deviation"
 
 
