@@ -169,7 +169,7 @@ class Texts(unittest.TestCase):
         self.assertIn(
             "of Lean core's own constants, which the replay leaves alone, 1 entry differs from Tengoku's", text
         )  # read off the real notes of the first rehearsal: "1 entries"
-        self.assertIn("and is not judged;", text)
+        self.assertIn("0 entries of Tengoku's environment are not in the snapshot's and 0 are the other way; none of them is judged;", text)
         m2 = copy.deepcopy(m)
         m2["checks"]["ext_faithful"]["core"]["differs"] = 3
         self.assertIn("3 entries differ from Tengoku's", N.notes_md(m2, "snapshot-x", "1", 100, SHA))
@@ -184,6 +184,44 @@ class Texts(unittest.TestCase):
             None  # a comparison that did not know which constants the replay added says nothing about core's
         )
         self.assertNotIn("Lean core's own constants", N.notes_md(no_core, "snapshot-x", "1", 100, SHA))
+
+    def test_the_notes_say_how_many_entries_of_core_s_constants_tengoku_has_and_the_snapshot_has_not(self):
+        # the whole-tree snapshots had 11 such entries (one reducibility attribute and ten scoped instances of core's constants) that the notes did not say a word about
+        m = copy.deepcopy(MANIFEST)
+        m["checks"]["extensions"] = EXT
+        m["checks"]["ext_faithful"] = copy.deepcopy(EXT_FAITHFUL)
+        m["checks"]["ext_faithful"]["core"].update({"differs": 1, "lost": 11, "extra": 1})
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn(
+            "1 entry differs from Tengoku's (a library changed what core says about them), 11 entries of Tengoku's environment are not in the snapshot's and 1 is the other way; none of them is judged;",
+            text,
+        )
+        m["checks"]["ext_faithful"]["core"].update({"differs": 2, "lost": 1, "extra": 0})
+        self.assertIn(
+            "2 entries differ from Tengoku's (a library changed what core says about them), 1 entry of Tengoku's environment is not in the snapshot's and 0 are the other way;",
+            N.notes_md(m, "snapshot-x", "1", 100, SHA),
+        )
+
+    def test_a_declaration_the_kernel_refused_is_named_and_one_stubbed_is_one_stub(self):
+        m = copy.deepcopy(MANIFEST)
+        self.assertIn(
+            "the kernel accepted every declaration of every layer (0 refused of 612,257 constants added);",
+            N.notes_md(m, "snapshot-x", "1", 100, SHA),
+        )
+        m["layers"] = [
+            {"module": "TengaiData.Foundation", "replay": {"refused": ["Rat.instEncodable"]}},
+            {"module": "TengaiData.Topic.Alpha", "replay": {"refused": []}},
+        ]
+        m["totals"]["refused"] = 1
+        m["checks"]["faithful"]["refused_and_stubbed"] = 1
+        text = N.notes_md(m, "snapshot-x", "1", 100, SHA)
+        self.assertIn(
+            "the kernel accepted every declaration of every layer but 1 (`Rat.instEncodable`: refused, and stubbed as an axiom of its type), of 612,257 constants added;",
+            text,
+        )
+        self.assertIn("1 was stubbed after a refusal", text)
+        m["checks"]["faithful"]["refused_and_stubbed"] = 2
+        self.assertIn("2 were stubbed after a refusal", N.notes_md(m, "snapshot-x", "1", 100, SHA))
 
     def test_the_notes_say_that_an_independent_kernel_accepted_the_layers_and_then_do_not_list_it_as_unchecked(self):
         m = copy.deepcopy(MANIFEST)

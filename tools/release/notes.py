@@ -98,6 +98,12 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         if ext
         else "It carries constants only, no instances, simp sets, notation or tactics."
     )
+    refused = [n for layer in m["layers"] for n in (layer.get("replay") or {}).get("refused", [])]
+    kernel_line = (
+        f"- the kernel accepted every declaration of every layer but {len(refused):,} ({', '.join(f'`{n}`' for n in refused)}: refused, and stubbed as an axiom of its type), of {t['constants_added']:,} constants added;"
+        if refused
+        else f"- the kernel accepted every declaration of every layer ({t.get('refused', 0)} refused of {t['constants_added']:,} constants added);"
+    )
     lines = [
         f"# {tag}: Tengoku's statements as a layered snapshot (experimental)",
         "",
@@ -108,10 +114,10 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
         + " It is Tengoku **at the pin** named below, and it is **experimental**: no version promise, no stability, not a v1.",
         "",
         "**What was checked.**",
-        f"- the kernel accepted every declaration of every layer ({t.get('refused', 0)} refused of {t['constants_added']:,} constants added);",
+        kernel_line,
         f"- **faithful to Tengoku**: {f['compared']:,} constants compared by `tengai-typeinfo --hashes` against Tengoku's environment (the hash and the size of the type, the hash of the value): "
         f"{f['statement_stubs']:,} theorems stand as axioms of their type, {f['kept_with_value']:,} are kept with their proof, {f['same_with_value'] + f['same_without_value']:,} definitions and other declarations agree, "
-        f"{f['refused_and_stubbed']:,} were stubbed after a refusal; problems: {f['problems'] or 'none'}. The hash is Lean's 32 bits: a difference is certain, an agreement makes one very unlikely and is not a proof;",
+        f"{f['refused_and_stubbed']:,} {'was' if f['refused_and_stubbed'] == 1 else 'were'} stubbed after a refusal; problems: {f['problems'] or 'none'}. The hash is Lean's 32 bits: a difference is certain, an agreement makes one very unlikely and is not a proof;",
     ]
     nanoda = checks.get("nanoda")
     if nanoda:
@@ -130,7 +136,9 @@ def notes_md(m: dict, tag: str, run: str, archive_bytes: int, archive_sha256: st
                 f"- **the extension entries read back by the same tool** (`tengai-extinfo`) in Tengoku's environment and in the snapshot's: {ef['same']:,} entries the same, {ef['differs']:,} differ, {ef['lost']:,} lost, {ef['extra']:,} extra; "
                 f"instances registered {ef['instances']}, of which {ef['deviation']:,} are the other way in Tengoku ({ef['deviations'] or 'none'})"
                 + (
-                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} {'entry differs' if ef['core']['differs'] == 1 else 'entries differ'} from Tengoku's (a library changed what core says about them) and {'is' if ef['core']['differs'] == 1 else 'are'} not judged;"
+                    f"; of Lean core's own constants, which the replay leaves alone, {ef['core']['differs']:,} {'entry differs' if ef['core']['differs'] == 1 else 'entries differ'} from Tengoku's (a library changed what core says about them), "
+                    f"{ef['core'].get('lost', 0):,} {'entry' if ef['core'].get('lost', 0) == 1 else 'entries'} of Tengoku's environment {'is' if ef['core'].get('lost', 0) == 1 else 'are'} not in the snapshot's and "
+                    f"{ef['core'].get('extra', 0):,} {'is' if ef['core'].get('extra', 0) == 1 else 'are'} the other way; none of them is judged;"
                     if ef.get("core")
                     else ";"
                 )
